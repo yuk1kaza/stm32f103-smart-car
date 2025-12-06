@@ -1,0 +1,58 @@
+# Keil MDK-ARM
+*.uvguix.*
+*.bak
+*.ddk
+*.edk
+*.lst
+*.lnp
+*.mpf
+*.mpj
+*.omf
+*.plg
+*.rpt
+*.tmp
+*.__i
+*._ia
+*.crf
+*.d
+*.o
+*.axf
+*.tra
+*.dep
+*.build_log.htm
+*.iex
+*.htm
+*.sct
+*.map
+*.hex
+DebugConfig/
+RTE/
+Listings/
+Objects/
+
+# Build folders
+MDK-ARM/test1119/
+MDK-ARM/DebugConfig/
+MDK-ARM/RTE/
+
+# IDE files
+*.uvopt
+*.uvoptx
+*.uvproj
+*.uvprojx
+!*.uvprojx
+*.ini
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Keep important files
+!MDK-ARM/*.uvprojx
+!MDK-ARM/*.uvoptx

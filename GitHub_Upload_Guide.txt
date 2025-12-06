@@ -1,0 +1,110 @@
+===============================================
+GitHub 上传指南
+===============================================
+
+前提条件：
+-----------
+1. 已安装Git (https://git-scm.com/)
+2. 已有GitHub账号
+3. 已在GitHub创建仓库
+
+步骤1：配置Git用户信息
+-----------
+打开命令行（CMD或PowerShell），执行：
+
+git config --global user.name "你的用户名"
+git config --global user.email "weiyongxin2004@163.com"
+
+步骤2：在GitHub创建仓库
+-----------
+1. 登录 https://github.com
+2. 点击右上角 "+" -> "New repository"
+3. 填写仓库信息：
+   - Repository name: stm32f103-smart-car (或其他名称)
+   - Description: STM32F103智能小车项目
+   - Public 或 Private (根据需要选择)
+   - 不要勾选 "Initialize this repository with a README"
+4. 点击 "Create repository"
+
+步骤3：初始化本地仓库
+-----------
+在项目根目录打开命令行，执行：
+
+cd /d "你的项目路径"
+git init
+git add .
+git commit -m "Initial commit: STM32F103 Smart Car Project"
+
+步骤4：连接远程仓库
+-----------
+将下面的命令中的 YOUR_USERNAME 替换为你的GitHub用户名：
+
+git remote add origin https://github.com/YOUR_USERNAME/stm32f103-smart-car.git
+
+或者使用SSH（需要先配置SSH密钥）：
+
+git remote add origin git@github.com:YOUR_USERNAME/stm32f103-smart-car.git
+
+步骤5：推送到GitHub
+-----------
+git branch -M main
+git push -u origin main
+
+如果提示需要登录：
+- 输入GitHub用户名
+- 输入Personal Access Token (不是密码)
+
+如何获取Personal Access Token：
+1. GitHub -> Settings -> Developer settings
+2. Personal access tokens -> Tokens (classic)
+3. Generate new token
+4. 勾选 "repo" 权限
+5. 生成并复制token
+
+步骤6：后续更新
+-----------
+修改代码后，执行：
+
+git add .
+git commit -m "描述你的修改"
+git push
+
+常用Git命令：
+-----------
+git status              # 查看文件状态
+git log                 # 查看提交历史
+git diff                # 查看修改内容
+git pull                # 拉取远程更新
+git clone <url>         # 克隆仓库
+
+故障排除：
+-----------
+1. 如果push失败，可能需要先pull：
+   git pull origin main --allow-unrelated-histories
+   git push origin main
+
+2. 如果遇到权限问题：
+   - 检查Personal Access Token是否正确
+   - 检查仓库权限设置
+
+3. 如果要忽略某些文件：
+   - 编辑 .gitignore 文件
+   - 添加要忽略的文件或文件夹
+
+项目文件说明：
+-----------
+已创建的文件：
+- .gitignore          # Git忽略文件配置
+- README.md           # 项目说明文档
+- GitHub_Upload_Guide.txt  # 本指南
+
+建议的仓库结构：
+stm32f103-smart-car/
+├── Core/             # STM32 HAL库核心代码
+├── Drivers/          # STM32驱动库
+├── MDK-ARM/          # Keil项目文件
+├── .gitignore        # Git忽略配置
+├── README.md         # 项目说明
+└── test1119.ioc      # CubeMX配置文件
+
+===============================================

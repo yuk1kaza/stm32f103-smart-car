@@ -23,7 +23,7 @@
   * - PB0、PB1、PB3、PB4、PB5: 红外循迹传感器(左外/左内/中间/右内/右外)
   * - PB14、PB15: 超声波模块(TRIG/ECHO)
   * - PB6、PB7: OLED屏幕(SCL/SDA)
-  * - PA9、PB10: 蓝牙模块HC-05(RX/TX)
+  * - PA9、PA10: 蓝牙模块HC-05(TX/RX)
 
 
   *
@@ -70,27 +70,27 @@ typedef enum{
 /* USER CODE BEGIN PD */
 // PWM占空比定义（0-9999）
 #define PWM_SPEED_MAX    9999   // 最大速度：100%
-#define PWM_SPEED_MIN    0      // 最小速度：0%
+#define PWM_SPEED_MIN    500      // 最小速度：5%
 
 // 循迹基础速度
-#define BASE_SPEED       4500   // 循迹基础速度：45%
+#define BASE_SPEED       4000   // 循迹基础速度：40%da
 
 // PID参数（根据STM32 PWM范围调整）
-#define KP               2.5f   // 比例系数（调整为适合0-9999范围）
+#define KP               15.0f  // 比例系数（调整为适合0-9999范围）
 #define KI               0.05f  // 积分系数（小值，避免积分饱和）
 #define KD               15.0f  // 微分系数（增大以抑制震荡）
 
 // 积分限幅（防止积分饱和）
-#define INTEGRAL_MAX     2000.0f
+#define INTEGRAL_MAX     200.0f
 
 // 红外传感器权重（根据STM32 PWM范围调整）
 // 权重需要与PWM范围匹配，使得调整量在合理范围内
-// 左外(-800) 左内(-400) 中间(0) 右内(400) 右外(800)
-#define WEIGHT_LEFT_OUT  -800
-#define WEIGHT_LEFT_IN   -400
+// 左外(-80) 左内(-40) 中间(0) 右内(40) 右外(80)
+#define WEIGHT_LEFT_OUT  -80
+#define WEIGHT_LEFT_IN   -40
 #define WEIGHT_MID        0
-#define WEIGHT_RIGHT_IN   400
-#define WEIGHT_RIGHT_OUT  800
+#define WEIGHT_RIGHT_IN   40
+#define WEIGHT_RIGHT_OUT  80
 
 // 超声波测距参数
 #define ULTRASONIC_TIMEOUT  30000   // 超时时间（微秒）：对应最大距离约5米
@@ -417,14 +417,14 @@ void Line_Tracking_PID(void)
 		int motor_adjust = (int)(pid.Kp * pid.last_error + 
 		                         pid.Kd * (0 - pid.last_error));
 		
-		int16_t left_speed = BASE_SPEED - motor_adjust;
-		int16_t right_speed = BASE_SPEED + motor_adjust;
+		int16_t left_speed = BASE_SPEED + motor_adjust;
+		int16_t right_speed = BASE_SPEED - motor_adjust;
 		
-		// 限幅
+		// 限幅（允许速度降到0）
 		if(left_speed > PWM_SPEED_MAX) left_speed = PWM_SPEED_MAX;
-		if(left_speed < PWM_SPEED_MIN) left_speed = PWM_SPEED_MIN;
+		if(left_speed < 0) left_speed = 0;
 		if(right_speed > PWM_SPEED_MAX) right_speed = PWM_SPEED_MAX;
-		if(right_speed < PWM_SPEED_MIN) right_speed = PWM_SPEED_MIN;
+		if(right_speed < 0) right_speed = 0;
 		
 		Motor_DifferentialSpeed(left_speed, right_speed);
 		return;
@@ -437,16 +437,16 @@ void Line_Tracking_PID(void)
 	int motor_adjust = PID_Calculate(&pid, error);
 	
 	// 根据PID输出调整左右电机速度
-	// leftSpeed = baseSpeed - motorAdjust
-	// rightSpeed = baseSpeed + motorAdjust
-	int16_t left_speed = BASE_SPEED - motor_adjust;
-	int16_t right_speed = BASE_SPEED + motor_adjust;
+	// leftSpeed = baseSpeed + motorAdjust
+	// rightSpeed = baseSpeed - motorAdjust
+	int16_t left_speed = BASE_SPEED + motor_adjust;
+	int16_t right_speed = BASE_SPEED - motor_adjust;
 	
-	// 限幅
+	// 限幅（允许速度降到0，实现更大的转向差速）
 	if(left_speed > PWM_SPEED_MAX) left_speed = PWM_SPEED_MAX;
-	if(left_speed < PWM_SPEED_MIN) left_speed = PWM_SPEED_MIN;
+	if(left_speed < 0) left_speed = 0;  // 允许降到0，但不反转
 	if(right_speed > PWM_SPEED_MAX) right_speed = PWM_SPEED_MAX;
-	if(right_speed < PWM_SPEED_MIN) right_speed = PWM_SPEED_MIN;
+	if(right_speed < 0) right_speed = 0;  // 允许降到0，但不反转
 	
 	// 差速控制
 	Motor_DifferentialSpeed(left_speed, right_speed);
@@ -470,6 +470,7 @@ void delay_us(uint32_t us)
 float Ultrasonic_GetDistance(void)
 {
 	uint32_t echo_time = 0;
+	uint32_t timeout = 0;
 	
 	// 1. 发送10us的触发脉冲
 	HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_RESET);
@@ -479,7 +480,7 @@ float Ultrasonic_GetDistance(void)
 	HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_RESET);
 	
 	// 2. 等待ECHO引脚变为高电平（超时保护）
-	uint32_t timeout = ULTRASONIC_TIMEOUT;
+	timeout = ULTRASONIC_TIMEOUT;
 	while(HAL_GPIO_ReadPin(ECHO_GPIO_Port, ECHO_Pin) == GPIO_PIN_RESET)
 	{
 		if(--timeout == 0) return -1.0f;  // 超时
@@ -543,7 +544,6 @@ void Ultrasonic_SendDebugInfo(void)
 }
 
 
-
 /* USER CODE END 0 */
 
 /**
@@ -579,17 +579,16 @@ int main(void)
   MX_TIM2_Init();
   MX_USART1_UART_Init();
   MX_I2C1_Init();
-		HAL_Delay(20);
- OLED_Init();
   /* USER CODE BEGIN 2 */
-	// 初始化OLED显示屏
-	HAL_Delay(20);
-	OLED_Init();
+	// 初始化OLED显示屏（暂时注释，排查停顿问题）
+	// HAL_Delay(20);
+	// OLED_Init();
+	
 	// 禁用JTAG，释放PB3、PB4引脚作为普通GPIO
 	// 保留SWD调试功能（PA13/PA14）
 	__HAL_AFIO_REMAP_SWJ_NOJTAG();
 	
-	// 启动TIM1（用于超声波微秒延时）
+	// 启动TIM1（用于超声波微秒延时�?
 	HAL_TIM_Base_Start(&htim1);
 	
 	// 启动PWM输出
@@ -599,13 +598,13 @@ int main(void)
 	// 初始化PID控制器（添加积分项）
 	PID_Init(&pid, KP, KI, KD);
 	
-	// 初始化蓝牙模块
+	// 初始化蓝牙模�?
 	Bluetooth_Init();
 	
-	// 初始化电机为停止状态
+	// 初始化电机为停止状�??
 	Motor_Stop();
 	
-	// 短暂延时，等待系统稳定
+	// 短暂延时，等待系统稳�?
 	HAL_Delay(500);
 	
   /* USER CODE END 2 */
@@ -709,7 +708,7 @@ void SystemClock_Config(void)
 /* USER CODE BEGIN 4 */
 
 /**
-  * @brief  初始化蓝牙模块
+  * @brief  初始化蓝牙模�?
   * @retval None
   */
 void Bluetooth_Init(void)
@@ -724,7 +723,7 @@ void Bluetooth_Init(void)
   */
 void Bluetooth_Process(void)
 {
-	if(bt_command == 0) return;  // 没有新命令
+	if(bt_command == 0) return;  // 没有新命�?
 	
 	uint8_t cmd = bt_command;
 	bt_command = 0;  // 清除命令
@@ -746,14 +745,14 @@ void Bluetooth_Process(void)
 			current_mode = MODE_MANUAL;
 			break;
 		
-		// 手动控制（仅在手动模式下有效）
+		// 手动控制（仅在手动模式下有效�?
 		case 'F':  // 前进
 		case 'f':
 			if(current_mode == MODE_MANUAL)
 				Motor_Forward(BASE_SPEED);
 			break;
 			
-		case 'B':  // 后退
+		case 'B':  // 后�??
 		case 'b':
 			if(current_mode == MODE_MANUAL)
 				Motor_Backward(BASE_SPEED);

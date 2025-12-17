@@ -117,6 +117,10 @@ uint8_t bt_command = 0;
 
 // 超声波测距变量
 float ultrasonic_distance = 0.0f;  // 当前测量距离（cm）
+
+// 站点停靠相关变量
+uint16_t station_count = 0;        // 已停靠站点数
+uint8_t stop_time_seconds = 10;    // 停靠时间（秒），可通过上位机设置
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -138,6 +142,9 @@ int Calculate_Error(void);
 void PID_Init(PID_Controller *pid, float kp, float ki, float kd);
 int PID_Calculate(PID_Controller *pid, int error);
 void Line_Tracking_PID(void);
+
+// 站点停靠函数
+void Station_Stop(uint8_t stop_seconds);
 
 // 蓝牙控制函数
 void Bluetooth_Init(void);
@@ -393,19 +400,42 @@ int PID_Calculate(PID_Controller *pid, int error)
 }
 
 /**
-  * @brief  基于PID的循迹控制（添加积分项，优化全白/全黑处理）
+  * @brief  站点停靠功能（停靠指定时间）
+  * @param  stop_seconds: 停靠时间（秒）
+  * @retval None
+  */
+void Station_Stop(uint8_t stop_seconds)
+{
+	Motor_Stop();
+	station_count++;  // 站点数+1
+	
+	// 上报停靠状态
+	char buffer[50];
+	sprintf(buffer, "STATUS:STOP,STATION:%d\r\n", station_count);
+	UART_SendString(buffer);
+	
+	// 停靠指定时间
+	HAL_Delay(stop_seconds * 1000);
+	
+	// 清空PID积分
+	pid.integral = 0.0f;
+	
+	// 上报恢复前进状态
+	UART_SendString("STATUS:FORWARD\r\n");
+}
+
+/**
+  * @brief  基于PID的循迹控制（添加积分项，优化全白/全黑处理，支持站点停靠）
   * @retval None
   */
 void Line_Tracking_PID(void)
 {
 	int8_t sensors = Read_IR_Sensors();
 	
-	// 检测全黑（终点线）：停止
+	// 检测全黑（站点）：停靠指定时间
 	if(sensors == 0x1F)  // 0b11111
 	{
-		Motor_Stop();
-		// 清空积分项，避免下次启动时的积分累积
-		pid.integral = 0.0f;
+		Station_Stop(stop_time_seconds);
 		return;
 	}
 	
@@ -647,6 +677,25 @@ int main(void)
 				break;
 		}
 		
+		// 定时状态上报（每1秒）
+		static uint32_t last_report_time = 0;
+		if(HAL_GetTick() - last_report_time >= 1000)
+		{
+			last_report_time = HAL_GetTick();
+			
+			// 根据模式上报状态
+			if(current_mode == MODE_LINE_TRACK)
+			{
+				// 循迹模式：上报前进状态
+				UART_SendString("STATUS:FORWARD\r\n");
+			}
+			else if(current_mode == MODE_MANUAL)
+			{
+				// 手动模式：上报手动状态
+				UART_SendString("STATUS:MANUAL\r\n");
+			}
+		}
+		
 		// 超声波调试：定时发送距离数据（每500ms）
 		// 取消注释以启用自动超声波调试
 		// static uint32_t last_ultrasonic_time = 0;
@@ -779,6 +828,30 @@ void Bluetooth_Process(void)
 		case 'U':  // 超声波测距
 		case 'u':
 			Ultrasonic_SendDebugInfo();
+			break;
+		
+		// 查询状态
+		case 'Q':  // 查询当前状态
+		case 'q':
+		{
+			char status_buffer[100];
+			sprintf(status_buffer, "MODE:%d,STATION:%d,STOP_TIME:%d\r\n", 
+			        current_mode, station_count, stop_time_seconds);
+			UART_SendString(status_buffer);
+			break;
+		}
+		
+		// 设置停靠时间（通过数字键1-9设置1-9秒，0设置为10秒）
+		case '1': case '2': case '3': case '4': case '5':
+		case '6': case '7': case '8': case '9':
+			// 如果在停止模式，可以设置停靠时间
+			if(current_mode == MODE_STOP)
+			{
+				stop_time_seconds = cmd - '0';  // ASCII转数字
+				char confirm[50];
+				sprintf(confirm, "STOP_TIME_SET:%d\r\n", stop_time_seconds);
+				UART_SendString(confirm);
+			}
 			break;
 		
 		default:

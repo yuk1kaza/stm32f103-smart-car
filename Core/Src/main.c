@@ -780,36 +780,57 @@ void Bluetooth_Init(void)
   */
 void Bluetooth_Process(void)
 {
-	if(bt_command == 0) return;  // 没有新命�?
+	if(bt_command == 0) return;  // 没有新命令
 	
 	uint8_t cmd = bt_command;
 	bt_command = 0;  // 清除命令
 	
+	// 数字键0-9的处理（根据模式不同有不同功能）
+	if(cmd >= '0' && cmd <= '9')
+	{
+		if(current_mode == MODE_STOP)
+		{
+			// 停止模式下：设置停靠时间
+			stop_time_seconds = cmd - '0';  // ASCII转数字
+			if(stop_time_seconds == 0) stop_time_seconds = 10;  // 0表示10秒
+			char confirm[50];
+			sprintf(confirm, "STOP_TIME_SET:%d\r\n", stop_time_seconds);
+			UART_SendString(confirm);
+		}
+		else
+		{
+			// 其他模式下：切换模式
+			switch(cmd)
+			{
+				case '0':  // 停止模式
+					current_mode = MODE_STOP;
+					Motor_Stop();
+					break;
+					
+				case '1':  // 循迹模式
+					current_mode = MODE_LINE_TRACK;
+					pid.integral = 0.0f;  // 清空积分
+					break;
+					
+				case '2':  // 手动模式
+					current_mode = MODE_MANUAL;
+					break;
+			}
+		}
+		return;  // 处理完数字键后直接返回
+	}
+	
+	// 其他命令处理
 	switch(cmd)
 	{
-		// 模式切换
-		case '0':  // 停止模式
-			current_mode = MODE_STOP;
-			Motor_Stop();
-			break;
-			
-		case '1':  // 循迹模式
-			current_mode = MODE_LINE_TRACK;
-			pid.integral = 0.0f;  // 清空积分
-			break;
-			
-		case '2':  // 手动模式
-			current_mode = MODE_MANUAL;
-			break;
-		
-		// 手动控制（仅在手动模式下有效�?
+		// 手动控制（仅在手动模式下有效）
 		case 'F':  // 前进
 		case 'f':
 			if(current_mode == MODE_MANUAL)
 				Motor_Forward(BASE_SPEED);
 			break;
 			
-		case 'B':  // 后�??
+		case 'B':  // 后退
 		case 'b':
 			if(current_mode == MODE_MANUAL)
 				Motor_Backward(BASE_SPEED);
@@ -848,19 +869,6 @@ void Bluetooth_Process(void)
 			UART_SendString(status_buffer);
 			break;
 		}
-		
-		// 设置停靠时间（通过数字键1-9设置1-9秒，0设置为10秒）
-		case '1': case '2': case '3': case '4': case '5':
-		case '6': case '7': case '8': case '9':
-			// 如果在停止模式，可以设置停靠时间
-			if(current_mode == MODE_STOP)
-			{
-				stop_time_seconds = cmd - '0';  // ASCII转数字
-				char confirm[50];
-				sprintf(confirm, "STOP_TIME_SET:%d\r\n", stop_time_seconds);
-				UART_SendString(confirm);
-			}
-			break;
 		
 		default:
 			break;

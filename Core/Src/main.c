@@ -14,10 +14,10 @@
   * License. You may obtain a copy of the License at:
   *                        opensource.org/licenses/BSD-3-Clause
   *
-  * stm32f103_car_v1.0智能小车，连接了�???个l298n、两个电机�?�一个超声波模块、五个红外模块�?�一块四线OLED屏幕�???
+  * stm32f103_car_v1.0智能小车，连接了�????个l298n、两个电机�?�一个超声波模块、五个红外模块�?�一块四线OLED屏幕�????
   * 拥有超声波避障�?�循迹寻线�?�OLED显示等功能�??
   * 其中PA0、PA3分别连接了l298n驱动模块的PWM输入端INA INB, PA1、PA2、PA4、PA5分别连接了l298n驱动模块的输入端IN1、IN2、IN3、IN4
-  * PB0、PB1、PB3、PB4、PB5分别连接了红外循迹寻线传感器模块的左外�?�左内�?�中间�?�右内�?�右外信号输出端�???
+  * PB0、PB1、PB3、PB4、PB5分别连接了红外循迹寻线传感器模块的左外�?�左内�?�中间�?�右内�?�右外信号输出端�????
   * PB14和PB15分别连接了超声波模块的TRIG和ECHO信号输出端，
   * PB6连接了OLED屏幕的SCL信号输入端，PB7连接了OLED屏幕的SDA信号输入端�??
 
@@ -44,15 +44,15 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-// 小车结构�???
+// 小车结构�????
 typedef struct{
 	// 状�??(0:stop 1:running 2:pause)
 	int state;
 	
-	// 速度（H:�??? L:低）
+	// 速度（H:�???? L:低）
 	char v;
 	
-	// 停靠站数�???
+	// 停靠站数�????
 	int stasion_amount;
 }CAR;
 
@@ -71,27 +71,27 @@ typedef struct{
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-// 调试模式选择（只能�?�择�?个为1，其他为0�?
-#define DEBUG_ALL_PINS   0      // 测试�?有GPIOB引脚（找出实际连接）
-#define DEBUG_IR_SENSOR  1      // 红外传感器调试模�?
+// 调试模式选择（只能�?�择�??个为1，其他为0�??
+#define DEBUG_ALL_PINS   0      // 测试�??有GPIOB引脚（找出实际连接）
+#define DEBUG_IR_SENSOR  1      // 红外传感器调试模�??
 #define DEBUG_MOTOR      0      // 电机调试模式
 #define RUN_LINE_TRACK   0      // PID循迹运行模式
 
-// PWM占空比定义（0-9999�???
+// PWM占空比定义（0-9999�????
 #define PWM_SPEED_LOW    4000   // 低�?�：40%
 #define PWM_SPEED_MID    5000   // 中�?�：50%
 #define PWM_SPEED_HIGH   7000   // 高�?�：70%
-#define PWM_SPEED_MAX    9999   // �???大�?�度�???100%
+#define PWM_SPEED_MAX    9999   // �????大�?�度�????100%
 
 // 循迹基础速度
-#define BASE_SPEED       4500   // 循迹基础速度�???45%
+#define BASE_SPEED       4500   // 循迹基础速度�????45%
 
 // PID参数
 #define KP               40.0f  // 比例系数
 #define KI               0.0f   // 积分系数
 #define KD               10.0f  // 微分系数
 
-// 红外传感器权重（用于计算位置误差�???
+// 红外传感器权重（用于计算位置误差�????
 // 左外(-2) 左内(-1) 中间(0) 右内(1) 右外(2)
 #define WEIGHT_LEFT_OUT  -2
 #define WEIGHT_LEFT_IN   -1
@@ -111,7 +111,7 @@ typedef struct{
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-// PID控制器实�???
+// PID控制器实�????
 const uint8_t Data[] = {
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
@@ -169,7 +169,7 @@ void Motor_TurnLeft(uint16_t speed);
 void Motor_TurnRight(uint16_t speed);
 void Motor_DifferentialSpeed(int16_t left_speed, int16_t right_speed);
 
-// 红外传感器读取函�???
+// 红外传感器读取函�????
 int8_t Read_IR_Sensors(void);
 float Calculate_Position_Error(uint8_t *sensor_status);
 
@@ -202,7 +202,7 @@ void Motor_Stop(void)
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0);
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, 0);
 	
-	// �???有方向控制引脚设为低电平
+	// �????有方向控制引脚设为低电平
 	HAL_GPIO_WritePin(GPIOA, IN1_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(GPIOA, IN2_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(GPIOA, IN3_Pin, GPIO_PIN_RESET);
@@ -211,7 +211,7 @@ void Motor_Stop(void)
 
 /**
   * @brief  前进
-  * @param  speed: PWM占空�??? (0-9999)
+  * @param  speed: PWM占空�???? (0-9999)
   * @retval None
   */
 void Motor_Forward(uint16_t speed)
@@ -224,14 +224,14 @@ void Motor_Forward(uint16_t speed)
 	HAL_GPIO_WritePin(GPIOA, IN3_Pin, GPIO_PIN_SET);
 	HAL_GPIO_WritePin(GPIOA, IN4_Pin, GPIO_PIN_RESET);
 	
-	// 设置PWM占空�???
+	// 设置PWM占空�????
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed);
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, speed);
 }
 
 /**
   * @brief  后�??
-  * @param  speed: PWM占空�??? (0-9999)
+  * @param  speed: PWM占空�???? (0-9999)
   * @retval None
   */
 void Motor_Backward(uint16_t speed)
@@ -244,14 +244,14 @@ void Motor_Backward(uint16_t speed)
 	HAL_GPIO_WritePin(GPIOA, IN3_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(GPIOA, IN4_Pin, GPIO_PIN_SET);
 	
-	// 设置PWM占空�???
+	// 设置PWM占空�????
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed);
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, speed);
 }
 
 /**
   * @brief  左转
-  * @param  speed: PWM占空�??? (0-9999)
+  * @param  speed: PWM占空�???? (0-9999)
   * @retval None
   */
 void Motor_TurnLeft(uint16_t speed)
@@ -264,14 +264,14 @@ void Motor_TurnLeft(uint16_t speed)
 	HAL_GPIO_WritePin(GPIOA, IN3_Pin, GPIO_PIN_SET);
 	HAL_GPIO_WritePin(GPIOA, IN4_Pin, GPIO_PIN_RESET);
 	
-	// 设置PWM占空�???
+	// 设置PWM占空�????
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed);
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, speed);
 }
 
 /**
   * @brief  右转
-  * @param  speed: PWM占空�??? (0-9999)
+  * @param  speed: PWM占空�???? (0-9999)
   * @retval None
   */
 void Motor_TurnRight(uint16_t speed)
@@ -284,13 +284,13 @@ void Motor_TurnRight(uint16_t speed)
 	HAL_GPIO_WritePin(GPIOA, IN3_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(GPIOA, IN4_Pin, GPIO_PIN_SET);
 	
-	// 设置PWM占空�???
+	// 设置PWM占空�????
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed);
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, speed);
 }
 
 /**
-  * @brief  差�?�控制（左右电机不同速度�???
+  * @brief  差�?�控制（左右电机不同速度�????
   * @param  left_speed: 左电机�?�度 (-9999 ~ 9999，负数为反转)
   * @param  right_speed: 右电机�?�度 (-9999 ~ 9999，负数为反转)
   * @retval None
@@ -303,7 +303,7 @@ void Motor_DifferentialSpeed(int16_t left_speed, int16_t right_speed)
 	if(right_speed > PWM_SPEED_MAX) right_speed = PWM_SPEED_MAX;
 	if(right_speed < -PWM_SPEED_MAX) right_speed = -PWM_SPEED_MAX;
 	
-	// 左电机方向控�???
+	// 左电机方向控�????
 	if(left_speed >= 0)
 	{
 		// 正转
@@ -319,7 +319,7 @@ void Motor_DifferentialSpeed(int16_t left_speed, int16_t right_speed)
 		__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, -left_speed);
 	}
 	
-	// 右电机方向控�???
+	// 右电机方向控�????
 	if(right_speed >= 0)
 	{
 		// 正转
@@ -337,16 +337,16 @@ void Motor_DifferentialSpeed(int16_t left_speed, int16_t right_speed)
 }
 
 /**
-  * @brief  读取红外传感器状�??
-  * @retval 传感器状态（5位二进制�??1表示�??测到黑线�??0表示白色�??
+  * @brief  读取红外传感器状�???
+  * @retval 传感器状态（5位二进制�???1表示�???测到黑线�???0表示白色�???
   *         bit4: 左外, bit3: 左内, bit2: 中间, bit1: 右内, bit0: 右外
   */
 int8_t Read_IR_Sensors(void)
 {
 	int8_t sensor_value = 0;
 	
-	// 读取五个红外传感器
-	// 左边三个：标准逻辑，黑线=高电平(1)，白色=低电平(0)
+	// 读取五个红外传感�?
+	// 左边三个：标准�?�辑，黑�?=高电�?(1)，白�?=低电�?(0)
 	
 	if(HAL_GPIO_ReadPin(GPIOB, LEFT1_Pin) == GPIO_PIN_SET)  // 左外 PB0
 		sensor_value |= 0x10;
@@ -358,7 +358,7 @@ int8_t Read_IR_Sensors(void)
 		sensor_value |= 0x04;
 	
 	// 右边两个：传感器输出异常（低电平1.7V被识别为高电平）
-	// 解决方案：反转逻辑，RESET=黑线，SET=白色
+	// 解决方案：反转�?�辑，RESET=黑线，SET=白色
 	if(HAL_GPIO_ReadPin(GPIOB, RIGHT2_Pin) == GPIO_PIN_RESET) // 右内 PB4 (反转)
 		sensor_value |= 0x02;
 	
@@ -369,7 +369,7 @@ int8_t Read_IR_Sensors(void)
 }
 
 /**
-  * @brief  计算位置误差（加权平均法�??
+  * @brief  计算位置误差（加权平均法�???
   * @param  sensor_status: 传感器状态指针，用于返回特殊状�??
   *         0: 正常, 1: 全黑, 2: 全白
   * @retval 位置误差 (-2.0 ~ 2.0，负数表示偏左，正数表示偏右)
@@ -380,14 +380,14 @@ float Calculate_Position_Error(uint8_t *sensor_status)
 	float weighted_sum = 0;
 	int8_t sensor_count = 0;
 	
-	// �???测全黑（�???有传感器都检测到黑线�???
+	// �????测全黑（�????有传感器都检测到黑线�????
 	if(sensors == 0x1F)  // 0b11111
 	{
 		*sensor_status = 1;  // 全黑
 		return 0;  // 返回0误差
 	}
 	
-	// �???测全白（�???有传感器都没�???测到黑线�???
+	// �????测全白（�????有传感器都没�????测到黑线�????
 	if(sensors == 0x00)  // 0b00000
 	{
 		*sensor_status = 2;  // 全白
@@ -396,7 +396,7 @@ float Calculate_Position_Error(uint8_t *sensor_status)
 	
 	*sensor_status = 0;  // 正常状�??
 	
-	// 计算加权�???
+	// 计算加权�????
 	if(sensors & 0x10) { weighted_sum += WEIGHT_LEFT_OUT; sensor_count++; }  // 左外
 	if(sensors & 0x08) { weighted_sum += WEIGHT_LEFT_IN; sensor_count++; }   // 左内
 	if(sensors & 0x04) { weighted_sum += WEIGHT_MID; sensor_count++; }       // 中间
@@ -407,13 +407,13 @@ float Calculate_Position_Error(uint8_t *sensor_status)
 	if(sensor_count == 0)
 		return pid.last_error;
 	
-	// 返回加权平均�???
+	// 返回加权平均�????
 	return weighted_sum / sensor_count;
 }
 
 /**
-  * @brief  初始化PID控制�???
-  * @param  pid: PID控制器指�???
+  * @brief  初始化PID控制�????
+  * @param  pid: PID控制器指�????
   * @param  kp: 比例系数
   * @param  ki: 积分系数
   * @param  kd: 微分系数
@@ -433,9 +433,9 @@ void PID_Init(PID_Controller *pid, float kp, float ki, float kd)
 
 /**
   * @brief  PID计算
-  * @param  pid: PID控制器指�???
+  * @param  pid: PID控制器指�????
   * @param  error: 当前误差
-  * @retval PID输出�???
+  * @retval PID输出�????
   */
 float PID_Calculate(PID_Controller *pid, float error)
 {
@@ -447,7 +447,7 @@ float PID_Calculate(PID_Controller *pid, float error)
 	if(pid->integral > INTEGRAL_MAX) pid->integral = INTEGRAL_MAX;
 	if(pid->integral < -INTEGRAL_MAX) pid->integral = -INTEGRAL_MAX;
 	
-	// 计算微分�???
+	// 计算微分�????
 	pid->derivative = error - pid->last_error;
 	
 	// PID输出
@@ -462,7 +462,7 @@ float PID_Calculate(PID_Controller *pid, float error)
 }
 
 /**
-  * @brief  基于PID的循迹控�???
+  * @brief  基于PID的循迹控�????
   * @retval None
   */
 void Line_Tracking_PID(void)
@@ -472,13 +472,13 @@ void Line_Tracking_PID(void)
 	// 计算位置误差
 	float position_error = Calculate_Position_Error(&sensor_status);
 	
-	// �???查特殊状�???
-	if(sensor_status == 1)  // 全黑：停�???
+	// �????查特殊状�????
+	if(sensor_status == 1)  // 全黑：停�????
 	{
 		Motor_Stop();
 		return;
 	}
-	else if(sensor_status == 2)  // 全白：停�???
+	else if(sensor_status == 2)  // 全白：停�????
 	{
 		Motor_Stop();
 		return;
@@ -491,12 +491,12 @@ void Line_Tracking_PID(void)
 	int16_t left_speed = BASE_SPEED - (int16_t)pid_output;
 	int16_t right_speed = BASE_SPEED + (int16_t)pid_output;
 	
-	// 差�?�控�???
+	// 差�?�控�????
 	Motor_DifferentialSpeed(left_speed, right_speed);
 }
 
 /**
-  * @brief  红外传感器调试函�???
+  * @brief  红外传感器调试函�????
   * @retval None
   */
 void Debug_IR_Sensors(void)
@@ -504,7 +504,7 @@ void Debug_IR_Sensors(void)
 	int8_t sensors = Read_IR_Sensors();
 	char buffer[120];
 	
-	// 读取各个传感器状�???
+	// 读取各个传感器状�????
 	uint8_t left_out = (sensors & 0x10) ? 1 : 0;   // 左外
 	uint8_t left_in  = (sensors & 0x08) ? 1 : 0;   // 左内
 	uint8_t mid      = (sensors & 0x04) ? 1 : 0;   // 中间
@@ -535,18 +535,18 @@ void Debug_IR_Sensors(void)
 		UART_SendString(">>> ALL WHITE <<<\r\n");
 	
 	UART_SendString("\r\n");  // 空行分隔
-	HAL_Delay(300);  // �???300ms输出�???�???
+	HAL_Delay(300);  // �????300ms输出�????�????
 }
 
 /**
-  * @brief  测试�??有GPIOB引脚，找出实际连接的传感器引�??
+  * @brief  测试�???有GPIOB引脚，找出实际连接的传感器引�???
   * @retval None
   */
 void Debug_All_GPIOB_Pins(void)
 {
 	char buffer[150];
 	
-	// 读取GPIOB�??有引脚的状�??
+	// 读取GPIOB�???有引脚的状�??
 	uint16_t gpiob_idr = GPIOB->IDR;
 	
 	sprintf(buffer, "GPIOB All Pins (0-15):\r\n");
@@ -628,23 +628,23 @@ void UART_SendChar(uint8_t ch)
 {
 	// 等待发�?�缓冲区为空
 	while(__HAL_UART_GET_FLAG(&huart1, UART_FLAG_TXE) == RESET);
-	// 发�?�数�???
+	// 发�?�数�????
 	huart1.Instance->DR = ch;
-	// 等待发�?�完�???
+	// 等待发�?�完�????
 	while(__HAL_UART_GET_FLAG(&huart1, UART_FLAG_TC) == RESET);
 }
 
 /**
-  * @brief  串口发�?�字符串（不使用printf�???
-  * @param  str: 要发送的字符�???
+  * @brief  串口发�?�字符串（不使用printf�????
+  * @param  str: 要发送的字符�????
   * @retval None
   */
 void UART_SendString(const char *str)
 {
-	// 方法1：使用HAL库函�???
+	// 方法1：使用HAL库函�????
 	HAL_UART_Transmit(&huart1, (uint8_t *)str, strlen(str), 1000);
 	
-	// 方法2：�?�字符发送（如果HAL库有问题，可以用这个�???
+	// 方法2：�?�字符发送（如果HAL库有问题，可以用这个�????
 	/*
 	while(*str)
 	{
@@ -654,7 +654,7 @@ void UART_SendString(const char *str)
 }
 
 /**
-  * @brief  串口重定向（用于printf�???
+  * @brief  串口重定向（用于printf�????
   * @retval 字符
   */
 int fputc(int ch, FILE *f)
@@ -664,7 +664,7 @@ int fputc(int ch, FILE *f)
 }
 
 #ifdef __GNUC__
-// 对于GCC编译器，�???要重定向_write函数
+// 对于GCC编译器，�????要重定向_write函数
 int _write(int file, char *ptr, int len)
 {
 	HAL_UART_Transmit(&huart1, (uint8_t *)ptr, len, 1000);
@@ -707,19 +707,17 @@ int main(void)
   MX_TIM2_Init();
   MX_USART1_UART_Init();
   MX_I2C1_Init();
-		HAL_Delay(20);
- OLED_Init();
   /* USER CODE BEGIN 2 */
 		HAL_Delay(20);
  OLED_Init();
-	// 禁用JTAG，释放PB3、PB4引脚作为普通GPIO
-	// 保留SWD调试功能（PA13/PA14）
+	// 禁用JTAG，释放PB3、PB4引脚作为普�?�GPIO
+	// 保留SWD调试功能（PA13/PA14�?
 	__HAL_AFIO_REMAP_SWJ_NOJTAG();
 	
 	// 等待串口稳定
 	HAL_Delay(100);
 	
-	// �???�???单的测试：发送单个字�???
+	// �????�????单的测试：发送单个字�????
 	UART_SendChar('A');
 	UART_SendChar('B');
 	UART_SendChar('C');
@@ -730,17 +728,17 @@ int main(void)
 	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
 	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
 	
-	// 初始化PID控制�???
+	// 初始化PID控制�????
 	PID_Init(&pid, KP, KI, KD);
 	
 	// 初始化电机为停止状�??
 	Motor_Stop();
 	
-	// 测试串口字符串发�??
+	// 测试串口字符串发�???
 	UART_SendString("\r\n=== STM32 Smart Car ===\r\n");
 	UART_SendString("UART Test OK!\r\n");
 	
-	// 测试GPIO寄存器配�??
+	// 测试GPIO寄存器配�???
 	char test_buffer[100];
 	sprintf(test_buffer, "GPIOB CRL: 0x%08lX\r\n", GPIOB->CRL);
 	UART_SendString(test_buffer);
@@ -787,16 +785,16 @@ int main(void)
 		OLED_ShowFrame();
     HAL_Delay(20);
 
-		/* USER CODE END WHILE */
+    /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
 		
 		#if DEBUG_ALL_PINS
-			// 测试�??有GPIOB引脚
+			// 测试�???有GPIOB引脚
 			Debug_All_GPIOB_Pins();
 			
 		#elif DEBUG_IR_SENSOR
-			// 红外传感器调试模�??
+			// 红外传感器调试模�???
 			Debug_IR_Sensors();
 			
 		#elif DEBUG_MOTOR
@@ -806,10 +804,10 @@ int main(void)
 		#elif RUN_LINE_TRACK
 			// PID循迹控制（实时执行）
 			Line_Tracking_PID();
-			// 不添加延时，保持连续控制，避免顿�??
+			// 不添加延时，保持连续控制，避免顿�???
 			
 		#else
-			// 默认：停止状�??
+			// 默认：停止状�???
 			Motor_Stop();
 			HAL_Delay(1000);
 			UART_SendString("Please Select Debug Mode!\r\n");

@@ -14,12 +14,6 @@
   * License. You may obtain a copy of the License at:
   *                        opensource.org/licenses/BSD-3-Clause
   *
-  * stm32f103_car_v1.0智能小车，连接了�????个l298n、两个电机�?�一个超声波模块、五个红外模块�?�一块四线OLED屏幕�????
-  * 拥有超声波避障�?�循迹寻线�?�OLED显示等功能�??
-  * 其中PA0、PA3分别连接了l298n驱动模块的PWM输入端INA INB, PA1、PA2、PA4、PA5分别连接了l298n驱动模块的输入端IN1、IN2、IN3、IN4
-  * PB0、PB1、PB3、PB4、PB5分别连接了红外循迹寻线传感器模块的左外�?�左内�?�中间�?�右内�?�右外信号输出端�????
-  * PB14和PB15分别连接了超声波模块的TRIG和ECHO信号输出端，
-  * PB6连接了OLED屏幕的SCL信号输入端，PB7连接了OLED屏幕的SDA信号输入端�??
   * stm32f103_car_v1.0智能小车，连接了两个L298N、两个电机、一个超声波模块、五个红外模块、一个蓝牙模块、一块四线OLED屏幕。
   * 拥有超声波避障、循迹寻线、OLED显示等功能。
   * 
@@ -45,11 +39,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdio.h>
-#include <string.h> 
-
-#include "stm32f1xx_hal.h"  
 #include "oled.h"
+#include <string.h>
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/

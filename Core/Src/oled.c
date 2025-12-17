@@ -22,8 +22,7 @@
  *
   */
 
-#include "stm32f10x.h"
-#include "OLED.h"
+
 #include <string.h>
 #include <math.h>
 #include <stdio.h>

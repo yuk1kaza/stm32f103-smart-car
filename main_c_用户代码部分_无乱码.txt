@@ -1,0 +1,393 @@
+/* USER CODE BEGIN 0 */
+
+/**
+  * @brief  停止电机
+  * @retval None
+  */
+void Motor_Stop(void)
+{
+	// 停止PWM输出
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0);
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, 0);
+	
+	// 所有方向控制引脚设为低电平
+	HAL_GPIO_WritePin(GPIOA, IN1_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOA, IN2_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOA, IN3_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOA, IN4_Pin, GPIO_PIN_RESET);
+}
+
+/**
+  * @brief  前进
+  * @param  speed: PWM占空比 (0-9999)
+  * @retval None
+  */
+void Motor_Forward(uint16_t speed)
+{
+	// 左电机正转：IN1=1, IN2=0
+	HAL_GPIO_WritePin(GPIOA, IN1_Pin, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOA, IN2_Pin, GPIO_PIN_RESET);
+	
+	// 右电机正转：IN3=1, IN4=0
+	HAL_GPIO_WritePin(GPIOA, IN3_Pin, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOA, IN4_Pin, GPIO_PIN_RESET);
+	
+	// 设置PWM占空比
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed);
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, speed);
+}
+
+/**
+  * @brief  后退
+  * @param  speed: PWM占空比 (0-9999)
+  * @retval None
+  */
+void Motor_Backward(uint16_t speed)
+{
+	// 左电机反转：IN1=0, IN2=1
+	HAL_GPIO_WritePin(GPIOA, IN1_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOA, IN2_Pin, GPIO_PIN_SET);
+	
+	// 右电机反转：IN3=0, IN4=1
+	HAL_GPIO_WritePin(GPIOA, IN3_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOA, IN4_Pin, GPIO_PIN_SET);
+	
+	// 设置PWM占空比
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed);
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, speed);
+}
+
+/**
+  * @brief  左转（原地）
+  * @param  speed: PWM占空比 (0-9999)
+  * @retval None
+  */
+void Motor_TurnLeft(uint16_t speed)
+{
+	// 左电机反转：IN1=0, IN2=1
+	HAL_GPIO_WritePin(GPIOA, IN1_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOA, IN2_Pin, GPIO_PIN_SET);
+	
+	// 右电机正转：IN3=1, IN4=0
+	HAL_GPIO_WritePin(GPIOA, IN3_Pin, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOA, IN4_Pin, GPIO_PIN_RESET);
+	
+	// 设置PWM占空比
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed);
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, speed);
+}
+
+/**
+  * @brief  右转（原地）
+  * @param  speed: PWM占空比 (0-9999)
+  * @retval None
+  */
+void Motor_TurnRight(uint16_t speed)
+{
+	// 左电机正转：IN1=1, IN2=0
+	HAL_GPIO_WritePin(GPIOA, IN1_Pin, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOA, IN2_Pin, GPIO_PIN_RESET);
+	
+	// 右电机反转：IN3=0, IN4=1
+	HAL_GPIO_WritePin(GPIOA, IN3_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOA, IN4_Pin, GPIO_PIN_SET);
+	
+	// 设置PWM占空比
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed);
+	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, speed);
+}
+
+/**
+  * @brief  差速控制（左右电机不同速度）
+  * @param  left_speed: 左电机速度 (-9999 ~ 9999，负数为反转)
+  * @param  right_speed: 右电机速度 (-9999 ~ 9999，负数为反转)
+  * @retval None
+  */
+void Motor_DifferentialSpeed(int16_t left_speed, int16_t right_speed)
+{
+	// 限幅
+	if(left_speed > PWM_SPEED_MAX) left_speed = PWM_SPEED_MAX;
+	if(left_speed < -PWM_SPEED_MAX) left_speed = -PWM_SPEED_MAX;
+	if(right_speed > PWM_SPEED_MAX) right_speed = PWM_SPEED_MAX;
+	if(right_speed < -PWM_SPEED_MAX) right_speed = -PWM_SPEED_MAX;
+	
+	// 左电机方向控制
+	if(left_speed >= 0)
+	{
+		// 正转
+		HAL_GPIO_WritePin(GPIOA, IN1_Pin, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(GPIOA, IN2_Pin, GPIO_PIN_RESET);
+		__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, left_speed);
+	}
+	else
+	{
+		// 反转
+		HAL_GPIO_WritePin(GPIOA, IN1_Pin, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(GPIOA, IN2_Pin, GPIO_PIN_SET);
+		__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, -left_speed);
+	}
+	
+	// 右电机方向控制
+	if(right_speed >= 0)
+	{
+		// 正转
+		HAL_GPIO_WritePin(GPIOA, IN3_Pin, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(GPIOA, IN4_Pin, GPIO_PIN_RESET);
+		__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, right_speed);
+	}
+	else
+	{
+		// 反转
+		HAL_GPIO_WritePin(GPIOA, IN3_Pin, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(GPIOA, IN4_Pin, GPIO_PIN_SET);
+		__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, -right_speed);
+	}
+}
+
+/**
+  * @brief  读取红外传感器状态
+  * @retval 传感器状态（5位二进制，1表示检测到黑线，0表示白色）
+  *         bit4: 左外, bit3: 左内, bit2: 中间, bit1: 右内, bit0: 右外
+  */
+int8_t Read_IR_Sensors(void)
+{
+	int8_t sensor_value = 0;
+	
+	// 读取五个红外传感器（标准逻辑：黑线=高电平，白色=低电平）
+	if(HAL_GPIO_ReadPin(GPIOB, LEFT1_Pin) == GPIO_PIN_SET)  // 左外 PB0
+		sensor_value |= 0x10;
+	
+	if(HAL_GPIO_ReadPin(GPIOB, LEFT2_Pin) == GPIO_PIN_SET)  // 左内 PB1
+		sensor_value |= 0x08;
+	
+	if(HAL_GPIO_ReadPin(GPIOB, MID_Pin) == GPIO_PIN_SET)    // 中间 PB3
+		sensor_value |= 0x04;
+	
+	if(HAL_GPIO_ReadPin(GPIOB, RIGHT2_Pin) == GPIO_PIN_SET) // 右内 PB4
+		sensor_value |= 0x02;
+	
+	if(HAL_GPIO_ReadPin(GPIOB, RIGHT1_Pin) == GPIO_PIN_SET) // 右外 PB5
+		sensor_value |= 0x01;
+	
+	return sensor_value;
+}
+
+/**
+  * @brief  计算位置误差（加权法，根据STM32 PWM范围调整）
+  * @retval 位置误差（负数=偏左，正数=偏右）
+  */
+int Calculate_Error(void)
+{
+	int8_t sensors = Read_IR_Sensors();
+	int error = 0;
+	
+	// 使用加权策略计算误差（权重已调整为适合0-9999 PWM范围）
+	if(sensors & 0x10) error += WEIGHT_LEFT_OUT;   // 左外 -800
+	if(sensors & 0x08) error += WEIGHT_LEFT_IN;    // 左内 -400
+	if(sensors & 0x04) error += WEIGHT_MID;        // 中间  0
+	if(sensors & 0x02) error += WEIGHT_RIGHT_IN;   // 右内 +400
+	if(sensors & 0x01) error += WEIGHT_RIGHT_OUT;  // 右外 +800
+	
+	return error;
+}
+
+/**
+  * @brief  初始化PID控制器
+  * @param  pid: PID控制器指针
+  * @param  kp: 比例系数
+  * @param  ki: 积分系数
+  * @param  kd: 微分系数
+  * @retval None
+  */
+void PID_Init(PID_Controller *pid, float kp, float ki, float kd)
+{
+	pid->Kp = kp;
+	pid->Ki = ki;
+	pid->Kd = kd;
+	pid->error = 0;
+	pid->last_error = 0;
+	pid->integral = 0.0f;
+	pid->output = 0;
+}
+
+/**
+  * @brief  PID计算（添加积分项）
+  * @param  pid: PID控制器指针
+  * @param  error: 当前误差
+  * @retval PID输出值
+  */
+int PID_Calculate(PID_Controller *pid, int error)
+{
+	// 保存当前误差
+	pid->error = error;
+	
+	// 计算积分项（带限幅，防止积分饱和）
+	pid->integral += (float)error;
+	if(pid->integral > INTEGRAL_MAX) pid->integral = INTEGRAL_MAX;
+	if(pid->integral < -INTEGRAL_MAX) pid->integral = -INTEGRAL_MAX;
+	
+	// PID计算：output = Kp*error + Ki*integral + Kd*(error - last_error)
+	pid->output = (int)(pid->Kp * pid->error + 
+	                    pid->Ki * pid->integral + 
+	                    pid->Kd * (pid->error - pid->last_error));
+	
+	// 保存误差用于下次计算
+	pid->last_error = error;
+	
+	return pid->output;
+}
+
+/**
+  * @brief  基于PID的循迹控制（添加积分项，优化全白/全黑处理）
+  * @retval None
+  */
+void Line_Tracking_PID(void)
+{
+	int8_t sensors = Read_IR_Sensors();
+	
+	// 检测全黑（终点线）：停止
+	if(sensors == 0x1F)  // 0b11111
+	{
+		Motor_Stop();
+		// 清空积分项，避免下次启动时的积分累积
+		pid.integral = 0.0f;
+		return;
+	}
+	
+	// 检测全白（脱离轨道）：保持上次方向继续运行
+	if(sensors == 0x00)  // 0b00000
+	{
+		// 使用上次的误差继续运行，保持转向
+		// 不更新积分项，避免积分发散
+		int motor_adjust = (int)(pid.Kp * pid.last_error + 
+		                         pid.Kd * (0 - pid.last_error));
+		
+		int16_t left_speed = BASE_SPEED - motor_adjust;
+		int16_t right_speed = BASE_SPEED + motor_adjust;
+		
+		// 限幅
+		if(left_speed > PWM_SPEED_MAX) left_speed = PWM_SPEED_MAX;
+		if(left_speed < PWM_SPEED_MIN) left_speed = PWM_SPEED_MIN;
+		if(right_speed > PWM_SPEED_MAX) right_speed = PWM_SPEED_MAX;
+		if(right_speed < PWM_SPEED_MIN) right_speed = PWM_SPEED_MIN;
+		
+		Motor_DifferentialSpeed(left_speed, right_speed);
+		return;
+	}
+	
+	// 正常循迹：计算误差（加权法）
+	int error = Calculate_Error();
+	
+	// PID计算
+	int motor_adjust = PID_Calculate(&pid, error);
+	
+	// 根据PID输出调整左右电机速度
+	// leftSpeed = baseSpeed - motorAdjust
+	// rightSpeed = baseSpeed + motorAdjust
+	int16_t left_speed = BASE_SPEED - motor_adjust;
+	int16_t right_speed = BASE_SPEED + motor_adjust;
+	
+	// 限幅
+	if(left_speed > PWM_SPEED_MAX) left_speed = PWM_SPEED_MAX;
+	if(left_speed < PWM_SPEED_MIN) left_speed = PWM_SPEED_MIN;
+	if(right_speed > PWM_SPEED_MAX) right_speed = PWM_SPEED_MAX;
+	if(right_speed < PWM_SPEED_MIN) right_speed = PWM_SPEED_MIN;
+	
+	// 差速控制
+	Motor_DifferentialSpeed(left_speed, right_speed);
+}
+
+/**
+  * @brief  微秒级延时函数（使用TIM1）
+  * @param  us: 延时微秒数
+  * @retval None
+  */
+void delay_us(uint32_t us)
+{
+	__HAL_TIM_SET_COUNTER(&htim1, 0);  // 设置计数器值为0
+	while(__HAL_TIM_GET_COUNTER(&htim1) < us);  // 等待计数器达到us
+}
+
+/**
+  * @brief  超声波测距函数
+  * @retval 距离（cm），如果超时返回-1
+  */
+float Ultrasonic_GetDistance(void)
+{
+	uint32_t echo_time = 0;
+	uint32_t timeout = 0;
+	
+	// 1. 发送10us的触发脉冲
+	HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_RESET);
+	delay_us(2);
+	HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_SET);
+	delay_us(10);
+	HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_RESET);
+	
+	// 2. 等待ECHO引脚变为高电平（超时保护）
+	timeout = ULTRASONIC_TIMEOUT;
+	while(HAL_GPIO_ReadPin(ECHO_GPIO_Port, ECHO_Pin) == GPIO_PIN_RESET)
+	{
+		if(--timeout == 0) return -1.0f;  // 超时
+	}
+	
+	// 3. 开始计时（ECHO高电平持续时间）
+	__HAL_TIM_SET_COUNTER(&htim1, 0);
+	
+	// 4. 等待ECHO引脚变为低电平（超时保护）
+	timeout = ULTRASONIC_TIMEOUT;
+	while(HAL_GPIO_ReadPin(ECHO_GPIO_Port, ECHO_Pin) == GPIO_PIN_SET)
+	{
+		if(--timeout == 0) return -1.0f;  // 超时
+		if(__HAL_TIM_GET_COUNTER(&htim1) > ULTRASONIC_TIMEOUT) return -1.0f;  // 超时
+	}
+	
+	// 5. 读取计时器值
+	echo_time = __HAL_TIM_GET_COUNTER(&htim1);
+	
+	// 6. 计算距离：distance = (echo_time * sound_speed) / 2
+	// echo_time单位：微秒，sound_speed = 0.034 cm/us
+	// 除以2是因为声波往返
+	float distance = (echo_time * SOUND_SPEED) / 2.0f;
+	
+	return distance;
+}
+
+/**
+  * @brief  串口发送字符串
+  * @param  str: 要发送的字符串
+  * @retval None
+  */
+void UART_SendString(const char *str)
+{
+	HAL_UART_Transmit(&huart1, (uint8_t*)str, strlen(str), 1000);
+}
+
+/**
+  * @brief  发送超声波调试信息到串口
+  * @retval None
+  */
+void Ultrasonic_SendDebugInfo(void)
+{
+	char buffer[100];
+	
+	// 测量距离
+	ultrasonic_distance = Ultrasonic_GetDistance();
+	
+	// 格式化输出
+	if(ultrasonic_distance < 0)
+	{
+		sprintf(buffer, "Distance: ERROR (Timeout)\r\n");
+	}
+	else
+	{
+		sprintf(buffer, "Distance: %.2f cm\r\n", ultrasonic_distance);
+	}
+	
+	// 发送到串口
+	UART_SendString(buffer);
+}
+
+
+
+/* USER CODE END 0 */

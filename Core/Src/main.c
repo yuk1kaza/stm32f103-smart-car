@@ -14,12 +14,22 @@
   * License. You may obtain a copy of the License at:
   *                        opensource.org/licenses/BSD-3-Clause
   *
-  * stm32f103_car_v1.0智能小车，连接了�????个l298n、两个电机�?�一个超声波模块、五个红外模块�?�一块四线OLED屏幕�????
+  * stm32f103_car_v1.0智能小车，连接了�????个l298n、两个电机�?�一个超声波模块、五个红外模块�?�一块四线OLED屏幕�????
   * 拥有超声波避障�?�循迹寻线�?�OLED显示等功能�??
   * 其中PA0、PA3分别连接了l298n驱动模块的PWM输入端INA INB, PA1、PA2、PA4、PA5分别连接了l298n驱动模块的输入端IN1、IN2、IN3、IN4
-  * PB0、PB1、PB3、PB4、PB5分别连接了红外循迹寻线传感器模块的左外�?�左内�?�中间�?�右内�?�右外信号输出端�????
+  * PB0、PB1、PB3、PB4、PB5分别连接了红外循迹寻线传感器模块的左外�?�左内�?�中间�?�右内�?�右外信号输出端�????
   * PB14和PB15分别连接了超声波模块的TRIG和ECHO信号输出端，
   * PB6连接了OLED屏幕的SCL信号输入端，PB7连接了OLED屏幕的SDA信号输入端�??
+  * stm32f103_car_v1.0智能小车，连接了两个L298N、两个电机、一个超声波模块、五个红外模块、一个蓝牙模块、一块四线OLED屏幕。
+  * 拥有超声波避障、循迹寻线、OLED显示等功能。
+  * 
+  * 硬件连接：
+  * - PA0、PA3: L298N驱动模块的PWM输入端(INA/INB)
+  * - PA1、PA2、PA4、PA5: L298N驱动模块的输入端(IN1/IN2/IN3/IN4)
+  * - PB0、PB1、PB3、PB4、PB5: 红外循迹传感器(左外/左内/中间/右内/右外)
+  * - PB14、PB15: 超声波模块(TRIG/ECHO)
+  * - PB6、PB7: OLED屏幕(SCL/SDA)
+  * - PA9、PA10: 蓝牙模块HC-05(TX/RX)
 
 
   *
@@ -44,63 +54,55 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-// 小车结构�????
-typedef struct{
-	// 状�??(0:stop 1:running 2:pause)
-	int state;
-	
-	// 速度（H:�???? L:低）
-	char v;
-	
-	// 停靠站数�????
-	int stasion_amount;
-}CAR;
-
-// PID控制器结构体
+// PID控制器结构体（添加积分项）
 typedef struct{
 	float Kp;           // 比例系数
 	float Ki;           // 积分系数
 	float Kd;           // 微分系数
-	float error;        // 当前误差
-	float last_error;   // 上次误差
+	int error;          // 当前误差
+	int last_error;     // 上次误差
 	float integral;     // 误差积分
-	float derivative;   // 误差微分
-	float output;       // PID输出
+	int output;         // PID输出
 }PID_Controller;
+
+// 运行模式枚举
+typedef enum{
+	MODE_STOP = 0,      // 停止模式
+	MODE_LINE_TRACK,    // 循迹模式
+	MODE_MANUAL,        // 手动模式（蓝牙控制）
+	MODE_AVOID          // 避障模式（预留）
+}RunMode;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-// 调试模式选择（只能�?�择�??个为1，其他为0�??
-#define DEBUG_ALL_PINS   0      // 测试�??有GPIOB引脚（找出实际连接）
-#define DEBUG_IR_SENSOR  1      // 红外传感器调试模�??
-#define DEBUG_MOTOR      0      // 电机调试模式
-#define RUN_LINE_TRACK   0      // PID循迹运行模式
-
-// PWM占空比定义（0-9999�????
-#define PWM_SPEED_LOW    4000   // 低�?�：40%
-#define PWM_SPEED_MID    5000   // 中�?�：50%
-#define PWM_SPEED_HIGH   7000   // 高�?�：70%
-#define PWM_SPEED_MAX    9999   // �????大�?�度�????100%
+// PWM占空比定义（0-9999）
+#define PWM_SPEED_MAX    9999   // 最大速度：100%
+#define PWM_SPEED_MIN    500      // 最小速度：5%
 
 // 循迹基础速度
-#define BASE_SPEED       4500   // 循迹基础速度�????45%
+#define BASE_SPEED       4000   // 循迹基础速度：40%da
 
-// PID参数
-#define KP               40.0f  // 比例系数
-#define KI               0.0f   // 积分系数
-#define KD               10.0f  // 微分系数
+// PID参数（根据STM32 PWM范围调整）
+#define KP               15.0f  // 比例系数（调整为适合0-9999范围）
+#define KI               0.05f  // 积分系数（小值，避免积分饱和）
+#define KD               15.0f  // 微分系数（增大以抑制震荡）
 
-// 红外传感器权重（用于计算位置误差�????
-// 左外(-2) 左内(-1) 中间(0) 右内(1) 右外(2)
-#define WEIGHT_LEFT_OUT  -2
-#define WEIGHT_LEFT_IN   -1
+// 积分限幅（防止积分饱和）
+#define INTEGRAL_MAX     200.0f
+
+// 红外传感器权重（根据STM32 PWM范围调整）
+// 权重需要与PWM范围匹配，使得调整量在合理范围内
+// 左外(-80) 左内(-40) 中间(0) 右内(40) 右外(80)
+#define WEIGHT_LEFT_OUT  -80
+#define WEIGHT_LEFT_IN   -40
 #define WEIGHT_MID        0
-#define WEIGHT_RIGHT_IN   1
-#define WEIGHT_RIGHT_OUT  2
+#define WEIGHT_RIGHT_IN   40
+#define WEIGHT_RIGHT_OUT  80
 
-// 积分限幅
-#define INTEGRAL_MAX     1000.0f
+// 超声波测距参数
+#define ULTRASONIC_TIMEOUT  30000   // 超时时间（微秒）：对应最大距离约5米
+#define SOUND_SPEED         0.034f  // 声速：0.034 cm/us (340m/s)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -111,51 +113,22 @@ typedef struct{
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-// PID控制器实�????
-const uint8_t Data[] = {
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 
-0x80, 0xc0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xc0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xc0, 0x80, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0xf0, 0xfc, 0xfe, 0xff, 0xff, 0x7f, 0x3f, 0x3f, 0x0f, 0x07, 0x07, 
-0x07, 0x07, 0x07, 0x07, 0x0f, 0x2f, 0x3f, 0x7f, 0xff, 0xff, 0xff, 0xfe, 0xfc, 0xf0, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x3e, 0x3f, 0x3f, 0x7f, 0xbf, 0x3f, 0x1f, 0x00, 0x00, 0x07, 0xc7, 0xe3, 0xe0, 0xf0, 0xf0, 0xf0, 0xe3, 0xe7, 0xc7, 
-0x00, 0x18, 0x9f, 0xff, 0xff, 0xff, 0x7f, 0x3f, 0x3f, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0xe0, 0xf0, 
-0xf0, 0xf0, 0xfa, 0xff, 0xff, 0xfe, 0xfe, 0xfc, 0xfc, 0xfd, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xe7, 
-0xc3, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7e, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 
-0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf9, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x1f, 0x1f, 0x1f, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01, 0x00, 0x00, 0x71, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f, 0x0f, 
-0x07, 0x07, 0x07, 0x1f, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xf7, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+// PID控制器实例
+PID_Controller pid = {KP, KI, KD, 0, 0, 0.0f, 0};
 
-};
-const Image Img = {114, 64, Data};
+// 运行模式
+RunMode current_mode = MODE_LINE_TRACK;  // 默认循迹模式
 
-PID_Controller pid = {KP, KI, KD, 0, 0, 0, 0, 0};
+// 蓝牙接收缓冲区
+uint8_t bt_rx_buffer[1];
+uint8_t bt_command = 0;
+
+// 超声波测距变量
+float ultrasonic_distance = 0.0f;  // 当前测量距离（cm）
+
+// 站点停靠相关变量
+uint16_t station_count = 0;        // 已停靠站点数
+uint8_t stop_time_seconds = 10;    // 停靠时间（秒），可通过上位机设置
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -169,24 +142,29 @@ void Motor_TurnLeft(uint16_t speed);
 void Motor_TurnRight(uint16_t speed);
 void Motor_DifferentialSpeed(int16_t left_speed, int16_t right_speed);
 
-// 红外传感器读取函�????
+// 红外传感器读取函数
 int8_t Read_IR_Sensors(void);
-float Calculate_Position_Error(uint8_t *sensor_status);
+int Calculate_Error(void);
 
-// PID控制函数
+// PID控制函数（添加积分项）
 void PID_Init(PID_Controller *pid, float kp, float ki, float kd);
-float PID_Calculate(PID_Controller *pid, float error);
+int PID_Calculate(PID_Controller *pid, int error);
 void Line_Tracking_PID(void);
 
-// 调试函数
-void Debug_IR_Sensors(void);
-void Debug_Motor_Test(void);
-void Debug_All_GPIOB_Pins(void);
+// 站点停靠函数
+void Station_Stop(uint8_t stop_seconds);
 
-// 串口函数
-void UART_SendChar(uint8_t ch);
+// 蓝牙控制函数
+void Bluetooth_Init(void);
+void Bluetooth_Process(void);
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart);
+
+// 超声波测距函数
+float Ultrasonic_GetDistance(void);
+void Ultrasonic_SendDebugInfo(void);
+
+// 串口发送函数
 void UART_SendString(const char *str);
-int fputc(int ch, FILE *f);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -202,7 +180,7 @@ void Motor_Stop(void)
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0);
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, 0);
 	
-	// �????有方向控制引脚设为低电平
+	// 所有方向控制引脚设为低电平
 	HAL_GPIO_WritePin(GPIOA, IN1_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(GPIOA, IN2_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(GPIOA, IN3_Pin, GPIO_PIN_RESET);
@@ -211,7 +189,7 @@ void Motor_Stop(void)
 
 /**
   * @brief  前进
-  * @param  speed: PWM占空�???? (0-9999)
+  * @param  speed: PWM占空比 (0-9999)
   * @retval None
   */
 void Motor_Forward(uint16_t speed)
@@ -224,14 +202,14 @@ void Motor_Forward(uint16_t speed)
 	HAL_GPIO_WritePin(GPIOA, IN3_Pin, GPIO_PIN_SET);
 	HAL_GPIO_WritePin(GPIOA, IN4_Pin, GPIO_PIN_RESET);
 	
-	// 设置PWM占空�????
+	// 设置PWM占空比
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed);
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, speed);
 }
 
 /**
-  * @brief  后�??
-  * @param  speed: PWM占空�???? (0-9999)
+  * @brief  后退
+  * @param  speed: PWM占空比 (0-9999)
   * @retval None
   */
 void Motor_Backward(uint16_t speed)
@@ -244,14 +222,14 @@ void Motor_Backward(uint16_t speed)
 	HAL_GPIO_WritePin(GPIOA, IN3_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(GPIOA, IN4_Pin, GPIO_PIN_SET);
 	
-	// 设置PWM占空�????
+	// 设置PWM占空比
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed);
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, speed);
 }
 
 /**
-  * @brief  左转
-  * @param  speed: PWM占空�???? (0-9999)
+  * @brief  左转（原地）
+  * @param  speed: PWM占空比 (0-9999)
   * @retval None
   */
 void Motor_TurnLeft(uint16_t speed)
@@ -264,14 +242,14 @@ void Motor_TurnLeft(uint16_t speed)
 	HAL_GPIO_WritePin(GPIOA, IN3_Pin, GPIO_PIN_SET);
 	HAL_GPIO_WritePin(GPIOA, IN4_Pin, GPIO_PIN_RESET);
 	
-	// 设置PWM占空�????
+	// 设置PWM占空比
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed);
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, speed);
 }
 
 /**
-  * @brief  右转
-  * @param  speed: PWM占空�???? (0-9999)
+  * @brief  右转（原地）
+  * @param  speed: PWM占空比 (0-9999)
   * @retval None
   */
 void Motor_TurnRight(uint16_t speed)
@@ -284,15 +262,15 @@ void Motor_TurnRight(uint16_t speed)
 	HAL_GPIO_WritePin(GPIOA, IN3_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(GPIOA, IN4_Pin, GPIO_PIN_SET);
 	
-	// 设置PWM占空�????
+	// 设置PWM占空比
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed);
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, speed);
 }
 
 /**
-  * @brief  差�?�控制（左右电机不同速度�????
-  * @param  left_speed: 左电机�?�度 (-9999 ~ 9999，负数为反转)
-  * @param  right_speed: 右电机�?�度 (-9999 ~ 9999，负数为反转)
+  * @brief  差速控制（左右电机不同速度）
+  * @param  left_speed: 左电机速度 (-9999 ~ 9999，负数为反转)
+  * @param  right_speed: 右电机速度 (-9999 ~ 9999，负数为反转)
   * @retval None
   */
 void Motor_DifferentialSpeed(int16_t left_speed, int16_t right_speed)
@@ -303,7 +281,7 @@ void Motor_DifferentialSpeed(int16_t left_speed, int16_t right_speed)
 	if(right_speed > PWM_SPEED_MAX) right_speed = PWM_SPEED_MAX;
 	if(right_speed < -PWM_SPEED_MAX) right_speed = -PWM_SPEED_MAX;
 	
-	// 左电机方向控�????
+	// 左电机方向控制
 	if(left_speed >= 0)
 	{
 		// 正转
@@ -319,7 +297,7 @@ void Motor_DifferentialSpeed(int16_t left_speed, int16_t right_speed)
 		__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, -left_speed);
 	}
 	
-	// 右电机方向控�????
+	// 右电机方向控制
 	if(right_speed >= 0)
 	{
 		// 正转
@@ -337,17 +315,15 @@ void Motor_DifferentialSpeed(int16_t left_speed, int16_t right_speed)
 }
 
 /**
-  * @brief  读取红外传感器状�???
-  * @retval 传感器状态（5位二进制�???1表示�???测到黑线�???0表示白色�???
+  * @brief  读取红外传感器状态
+  * @retval 传感器状态（5位二进制，1表示检测到黑线，0表示白色）
   *         bit4: 左外, bit3: 左内, bit2: 中间, bit1: 右内, bit0: 右外
   */
 int8_t Read_IR_Sensors(void)
 {
 	int8_t sensor_value = 0;
 	
-	// 读取五个红外传感�?
-	// 左边三个：标准�?�辑，黑�?=高电�?(1)，白�?=低电�?(0)
-	
+	// 读取五个红外传感器（标准逻辑：黑线=高电平，白色=低电平）
 	if(HAL_GPIO_ReadPin(GPIOB, LEFT1_Pin) == GPIO_PIN_SET)  // 左外 PB0
 		sensor_value |= 0x10;
 	
@@ -357,63 +333,37 @@ int8_t Read_IR_Sensors(void)
 	if(HAL_GPIO_ReadPin(GPIOB, MID_Pin) == GPIO_PIN_SET)    // 中间 PB3
 		sensor_value |= 0x04;
 	
-	// 右边两个：传感器输出异常（低电平1.7V被识别为高电平）
-	// 解决方案：反转�?�辑，RESET=黑线，SET=白色
-	if(HAL_GPIO_ReadPin(GPIOB, RIGHT2_Pin) == GPIO_PIN_RESET) // 右内 PB4 (反转)
+	if(HAL_GPIO_ReadPin(GPIOB, RIGHT2_Pin) == GPIO_PIN_SET) // 右内 PB4
 		sensor_value |= 0x02;
 	
-	if(HAL_GPIO_ReadPin(GPIOB, RIGHT1_Pin) == GPIO_PIN_RESET) // 右外 PB5 (反转)
+	if(HAL_GPIO_ReadPin(GPIOB, RIGHT1_Pin) == GPIO_PIN_SET) // 右外 PB5
 		sensor_value |= 0x01;
 	
 	return sensor_value;
 }
 
 /**
-  * @brief  计算位置误差（加权平均法�???
-  * @param  sensor_status: 传感器状态指针，用于返回特殊状�??
-  *         0: 正常, 1: 全黑, 2: 全白
-  * @retval 位置误差 (-2.0 ~ 2.0，负数表示偏左，正数表示偏右)
+  * @brief  计算位置误差（加权法，根据STM32 PWM范围调整）
+  * @retval 位置误差（负数=偏左，正数=偏右）
   */
-float Calculate_Position_Error(uint8_t *sensor_status)
+int Calculate_Error(void)
 {
 	int8_t sensors = Read_IR_Sensors();
-	float weighted_sum = 0;
-	int8_t sensor_count = 0;
+	int error = 0;
 	
-	// �????测全黑（�????有传感器都检测到黑线�????
-	if(sensors == 0x1F)  // 0b11111
-	{
-		*sensor_status = 1;  // 全黑
-		return 0;  // 返回0误差
-	}
+	// 使用加权策略计算误差（权重已调整为适合0-9999 PWM范围）
+	if(sensors & 0x10) error += WEIGHT_LEFT_OUT;   // 左外 -800
+	if(sensors & 0x08) error += WEIGHT_LEFT_IN;    // 左内 -400
+	if(sensors & 0x04) error += WEIGHT_MID;        // 中间  0
+	if(sensors & 0x02) error += WEIGHT_RIGHT_IN;   // 右内 +400
+	if(sensors & 0x01) error += WEIGHT_RIGHT_OUT;  // 右外 +800
 	
-	// �????测全白（�????有传感器都没�????测到黑线�????
-	if(sensors == 0x00)  // 0b00000
-	{
-		*sensor_status = 2;  // 全白
-		return pid.last_error;  // 保持上次误差
-	}
-	
-	*sensor_status = 0;  // 正常状�??
-	
-	// 计算加权�????
-	if(sensors & 0x10) { weighted_sum += WEIGHT_LEFT_OUT; sensor_count++; }  // 左外
-	if(sensors & 0x08) { weighted_sum += WEIGHT_LEFT_IN; sensor_count++; }   // 左内
-	if(sensors & 0x04) { weighted_sum += WEIGHT_MID; sensor_count++; }       // 中间
-	if(sensors & 0x02) { weighted_sum += WEIGHT_RIGHT_IN; sensor_count++; }  // 右内
-	if(sensors & 0x01) { weighted_sum += WEIGHT_RIGHT_OUT; sensor_count++; } // 右外
-	
-	// 如果没有传感器检测到黑线（不应该发生，已在上面处理）
-	if(sensor_count == 0)
-		return pid.last_error;
-	
-	// 返回加权平均�????
-	return weighted_sum / sensor_count;
+	return error;
 }
 
 /**
-  * @brief  初始化PID控制�????
-  * @param  pid: PID控制器指�????
+  * @brief  初始化PID控制器
+  * @param  pid: PID控制器指针
   * @param  kp: 比例系数
   * @param  ki: 积分系数
   * @param  kd: 微分系数
@@ -426,34 +376,30 @@ void PID_Init(PID_Controller *pid, float kp, float ki, float kd)
 	pid->Kd = kd;
 	pid->error = 0;
 	pid->last_error = 0;
-	pid->integral = 0;
-	pid->derivative = 0;
+	pid->integral = 0.0f;
 	pid->output = 0;
 }
 
 /**
-  * @brief  PID计算
-  * @param  pid: PID控制器指�????
+  * @brief  PID计算（添加积分项）
+  * @param  pid: PID控制器指针
   * @param  error: 当前误差
-  * @retval PID输出�????
+  * @retval PID输出值
   */
-float PID_Calculate(PID_Controller *pid, float error)
+int PID_Calculate(PID_Controller *pid, int error)
 {
 	// 保存当前误差
 	pid->error = error;
 	
-	// 计算积分项（带限幅）
-	pid->integral += error;
+	// 计算积分项（带限幅，防止积分饱和）
+	pid->integral += (float)error;
 	if(pid->integral > INTEGRAL_MAX) pid->integral = INTEGRAL_MAX;
 	if(pid->integral < -INTEGRAL_MAX) pid->integral = -INTEGRAL_MAX;
 	
-	// 计算微分�????
-	pid->derivative = error - pid->last_error;
-	
-	// PID输出
-	pid->output = pid->Kp * pid->error + 
-	              pid->Ki * pid->integral + 
-	              pid->Kd * pid->derivative;
+	// PID计算：output = Kp*error + Ki*integral + Kd*(error - last_error)
+	pid->output = (int)(pid->Kp * pid->error + 
+	                    pid->Ki * pid->integral + 
+	                    pid->Kd * (pid->error - pid->last_error));
 	
 	// 保存误差用于下次计算
 	pid->last_error = error;
@@ -462,215 +408,179 @@ float PID_Calculate(PID_Controller *pid, float error)
 }
 
 /**
-  * @brief  基于PID的循迹控�????
+  * @brief  站点停靠功能（停靠指定时间）
+  * @param  stop_seconds: 停靠时间（秒）
+  * @retval None
+  */
+void Station_Stop(uint8_t stop_seconds)
+{
+	Motor_Stop();
+	station_count++;  // 站点数+1
+	
+	// 上报停靠状态
+	char buffer[50];
+	sprintf(buffer, "STATUS:STOP,STATION:%d\r\n", station_count);
+	UART_SendString(buffer);
+	
+	// 停靠指定时间
+	HAL_Delay(stop_seconds * 1000);
+	
+	// 清空PID积分
+	pid.integral = 0.0f;
+	
+	// 上报恢复前进状态
+	UART_SendString("STATUS:FORWARD\r\n");
+}
+
+/**
+  * @brief  基于PID的循迹控制（添加积分项，优化全白/全黑处理，支持站点停靠）
   * @retval None
   */
 void Line_Tracking_PID(void)
 {
-	uint8_t sensor_status = 0;
+	int8_t sensors = Read_IR_Sensors();
 	
-	// 计算位置误差
-	float position_error = Calculate_Position_Error(&sensor_status);
-	
-	// �????查特殊状�????
-	if(sensor_status == 1)  // 全黑：停�????
+	// 检测全黑（站点）：停靠指定时间
+	if(sensors == 0x1F)  // 0b11111
 	{
-		Motor_Stop();
-		return;
-	}
-	else if(sensor_status == 2)  // 全白：停�????
-	{
-		Motor_Stop();
+		Station_Stop(stop_time_seconds);
 		return;
 	}
 	
-	// 正常循迹：PID计算
-	float pid_output = PID_Calculate(&pid, position_error);
+	// 检测全白（脱离轨道）：保持上次方向继续运行
+	if(sensors == 0x00)  // 0b00000
+	{
+		// 使用上次的误差继续运行，保持转向
+		// 不更新积分项，避免积分发散
+		int motor_adjust = (int)(pid.Kp * pid.last_error + 
+		                         pid.Kd * (0 - pid.last_error));
+		
+		int16_t left_speed = BASE_SPEED + motor_adjust;
+		int16_t right_speed = BASE_SPEED - motor_adjust;
+		
+		// 限幅（允许速度降到0）
+		if(left_speed > PWM_SPEED_MAX) left_speed = PWM_SPEED_MAX;
+		if(left_speed < 0) left_speed = 0;
+		if(right_speed > PWM_SPEED_MAX) right_speed = PWM_SPEED_MAX;
+		if(right_speed < 0) right_speed = 0;
+		
+		Motor_DifferentialSpeed(left_speed, right_speed);
+		return;
+	}
+	
+	// 正常循迹：计算误差（加权法）
+	int error = Calculate_Error();
+	
+	// PID计算
+	int motor_adjust = PID_Calculate(&pid, error);
 	
 	// 根据PID输出调整左右电机速度
-	int16_t left_speed = BASE_SPEED - (int16_t)pid_output;
-	int16_t right_speed = BASE_SPEED + (int16_t)pid_output;
+	// leftSpeed = baseSpeed + motorAdjust
+	// rightSpeed = baseSpeed - motorAdjust
+	int16_t left_speed = BASE_SPEED + motor_adjust;
+	int16_t right_speed = BASE_SPEED - motor_adjust;
 	
-	// 差�?�控�????
+	// 限幅（允许速度降到0，实现更大的转向差速）
+	if(left_speed > PWM_SPEED_MAX) left_speed = PWM_SPEED_MAX;
+	if(left_speed < 0) left_speed = 0;  // 允许降到0，但不反转
+	if(right_speed > PWM_SPEED_MAX) right_speed = PWM_SPEED_MAX;
+	if(right_speed < 0) right_speed = 0;  // 允许降到0，但不反转
+	
+	// 差速控制
 	Motor_DifferentialSpeed(left_speed, right_speed);
 }
 
 /**
-  * @brief  红外传感器调试函�????
+  * @brief  微秒级延时函数（使用TIM1）
+  * @param  us: 延时微秒数
   * @retval None
   */
-void Debug_IR_Sensors(void)
+void delay_us(uint32_t us)
 {
-	int8_t sensors = Read_IR_Sensors();
-	char buffer[120];
-	
-	// 读取各个传感器状�????
-	uint8_t left_out = (sensors & 0x10) ? 1 : 0;   // 左外
-	uint8_t left_in  = (sensors & 0x08) ? 1 : 0;   // 左内
-	uint8_t mid      = (sensors & 0x04) ? 1 : 0;   // 中间
-	uint8_t right_in = (sensors & 0x02) ? 1 : 0;   // 右内
-	uint8_t right_out= (sensors & 0x01) ? 1 : 0;   // 右外
-	
-	// 读取原始GPIO电平（用于调试）
-	uint8_t raw_left_out  = HAL_GPIO_ReadPin(GPIOB, LEFT1_Pin);
-	uint8_t raw_left_in   = HAL_GPIO_ReadPin(GPIOB, LEFT2_Pin);
-	uint8_t raw_mid       = HAL_GPIO_ReadPin(GPIOB, MID_Pin);
-	uint8_t raw_right_in  = HAL_GPIO_ReadPin(GPIOB, RIGHT2_Pin);
-	uint8_t raw_right_out = HAL_GPIO_ReadPin(GPIOB, RIGHT1_Pin);
-	
-	// 使用sprintf格式化字符串（不依赖printf重定向）
-	sprintf(buffer, "IR: [%d][%d][%d][%d][%d] Raw:0x%02X\r\n", 
-	        left_out, left_in, mid, right_in, right_out, sensors);
-	UART_SendString(buffer);
-	
-	// 输出原始GPIO电平（用于判断传感器极�?�）
-	sprintf(buffer, "GPIO: [%d][%d][%d][%d][%d]\r\n", 
-	        raw_left_out, raw_left_in, raw_mid, raw_right_in, raw_right_out);
-	UART_SendString(buffer);
-	
-	// 判断特殊状�??
-	if(sensors == 0x1F)
-		UART_SendString(">>> ALL BLACK <<<\r\n");
-	else if(sensors == 0x00)
-		UART_SendString(">>> ALL WHITE <<<\r\n");
-	
-	UART_SendString("\r\n");  // 空行分隔
-	HAL_Delay(300);  // �????300ms输出�????�????
+	__HAL_TIM_SET_COUNTER(&htim1, 0);  // 设置计数器值为0
+	while(__HAL_TIM_GET_COUNTER(&htim1) < us);  // 等待计数器达到us
 }
 
 /**
-  * @brief  测试�???有GPIOB引脚，找出实际连接的传感器引�???
-  * @retval None
+  * @brief  超声波测距函数
+  * @retval 距离（cm），如果超时返回-1
   */
-void Debug_All_GPIOB_Pins(void)
+float Ultrasonic_GetDistance(void)
 {
-	char buffer[150];
+	uint32_t echo_time = 0;
+	uint32_t timeout = 0;
 	
-	// 读取GPIOB�???有引脚的状�??
-	uint16_t gpiob_idr = GPIOB->IDR;
+	// 1. 发送10us的触发脉冲
+	HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_RESET);
+	delay_us(2);
+	HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_SET);
+	delay_us(10);
+	HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, GPIO_PIN_RESET);
 	
-	sprintf(buffer, "GPIOB All Pins (0-15):\r\n");
-	UART_SendString(buffer);
+	// 2. 等待ECHO引脚变为高电平（超时保护）
+	timeout = ULTRASONIC_TIMEOUT;
+	while(HAL_GPIO_ReadPin(ECHO_GPIO_Port, ECHO_Pin) == GPIO_PIN_RESET)
+	{
+		if(--timeout == 0) return -1.0f;  // 超时
+	}
 	
-	sprintf(buffer, "PB0=%d PB1=%d PB2=%d PB3=%d PB4=%d PB5=%d PB6=%d PB7=%d\r\n",
-	        (gpiob_idr & 0x0001) ? 1 : 0,
-	        (gpiob_idr & 0x0002) ? 1 : 0,
-	        (gpiob_idr & 0x0004) ? 1 : 0,
-	        (gpiob_idr & 0x0008) ? 1 : 0,
-	        (gpiob_idr & 0x0010) ? 1 : 0,
-	        (gpiob_idr & 0x0020) ? 1 : 0,
-	        (gpiob_idr & 0x0040) ? 1 : 0,
-	        (gpiob_idr & 0x0080) ? 1 : 0);
-	UART_SendString(buffer);
+	// 3. 开始计时（ECHO高电平持续时间）
+	__HAL_TIM_SET_COUNTER(&htim1, 0);
 	
-	sprintf(buffer, "PB8=%d PB9=%d PB10=%d PB11=%d PB12=%d PB13=%d PB14=%d PB15=%d\r\n",
-	        (gpiob_idr & 0x0100) ? 1 : 0,
-	        (gpiob_idr & 0x0200) ? 1 : 0,
-	        (gpiob_idr & 0x0400) ? 1 : 0,
-	        (gpiob_idr & 0x0800) ? 1 : 0,
-	        (gpiob_idr & 0x1000) ? 1 : 0,
-	        (gpiob_idr & 0x2000) ? 1 : 0,
-	        (gpiob_idr & 0x4000) ? 1 : 0,
-	        (gpiob_idr & 0x8000) ? 1 : 0);
-	UART_SendString(buffer);
+	// 4. 等待ECHO引脚变为低电平（超时保护）
+	timeout = ULTRASONIC_TIMEOUT;
+	while(HAL_GPIO_ReadPin(ECHO_GPIO_Port, ECHO_Pin) == GPIO_PIN_SET)
+	{
+		if(--timeout == 0) return -1.0f;  // 超时
+		if(__HAL_TIM_GET_COUNTER(&htim1) > ULTRASONIC_TIMEOUT) return -1.0f;  // 超时
+	}
 	
-	sprintf(buffer, "IDR Raw: 0x%04X\r\n\r\n", gpiob_idr);
-	UART_SendString(buffer);
+	// 5. 读取计时器值
+	echo_time = __HAL_TIM_GET_COUNTER(&htim1);
 	
-	HAL_Delay(500);
+	// 6. 计算距离：distance = (echo_time * sound_speed) / 2
+	// echo_time单位：微秒，sound_speed = 0.034 cm/us
+	// 除以2是因为声波往返
+	float distance = (echo_time * SOUND_SPEED) / 2.0f;
+	
+	return distance;
 }
 
 /**
-  * @brief  电机测试函数
-  * @retval None
-  */
-void Debug_Motor_Test(void)
-{
-	UART_SendString("Motor Test: Forward\r\n");
-	Motor_Forward(PWM_SPEED_MID);
-	HAL_Delay(2000);
-	
-	UART_SendString("Motor Test: Stop\r\n");
-	Motor_Stop();
-	HAL_Delay(1000);
-	
-	UART_SendString("Motor Test: Backward\r\n");
-	Motor_Backward(PWM_SPEED_MID);
-	HAL_Delay(2000);
-	
-	UART_SendString("Motor Test: Stop\r\n");
-	Motor_Stop();
-	HAL_Delay(1000);
-	
-	UART_SendString("Motor Test: Turn Left\r\n");
-	Motor_TurnLeft(PWM_SPEED_LOW);
-	HAL_Delay(1000);
-	
-	UART_SendString("Motor Test: Stop\r\n");
-	Motor_Stop();
-	HAL_Delay(1000);
-	
-	UART_SendString("Motor Test: Turn Right\r\n");
-	Motor_TurnRight(PWM_SPEED_LOW);
-	HAL_Delay(1000);
-	
-	UART_SendString("Motor Test: Stop\r\n");
-	Motor_Stop();
-	HAL_Delay(2000);
-}
-
-/**
-  * @brief  串口发�?�单个字符（底层方法，用于测试）
-  * @param  ch: 要发送的字符
-  * @retval None
-  */
-void UART_SendChar(uint8_t ch)
-{
-	// 等待发�?�缓冲区为空
-	while(__HAL_UART_GET_FLAG(&huart1, UART_FLAG_TXE) == RESET);
-	// 发�?�数�????
-	huart1.Instance->DR = ch;
-	// 等待发�?�完�????
-	while(__HAL_UART_GET_FLAG(&huart1, UART_FLAG_TC) == RESET);
-}
-
-/**
-  * @brief  串口发�?�字符串（不使用printf�????
-  * @param  str: 要发送的字符�????
+  * @brief  串口发送字符串
+  * @param  str: 要发送的字符串
   * @retval None
   */
 void UART_SendString(const char *str)
 {
-	// 方法1：使用HAL库函�????
-	HAL_UART_Transmit(&huart1, (uint8_t *)str, strlen(str), 1000);
-	
-	// 方法2：�?�字符发送（如果HAL库有问题，可以用这个�????
-	/*
-	while(*str)
-	{
-		UART_SendChar(*str++);
-	}
-	*/
+	HAL_UART_Transmit(&huart1, (uint8_t*)str, strlen(str), 1000);
 }
 
 /**
-  * @brief  串口重定向（用于printf�????
-  * @retval 字符
+  * @brief  发送超声波调试信息到串口
+  * @retval None
   */
-int fputc(int ch, FILE *f)
+void Ultrasonic_SendDebugInfo(void)
 {
-	HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 1000);
-	return ch;
+	char buffer[100];
+	
+	// 测量距离
+	ultrasonic_distance = Ultrasonic_GetDistance();
+	
+	// 格式化输出
+	if(ultrasonic_distance < 0)
+	{
+		sprintf(buffer, "Distance: ERROR (Timeout)\r\n");
+	}
+	else
+	{
+		sprintf(buffer, "Distance: %.2f cm\r\n", ultrasonic_distance);
+	}
+	
+	// 发送到串口
+	UART_SendString(buffer);
 }
 
-#ifdef __GNUC__
-// 对于GCC编译器，�????要重定向_write函数
-int _write(int file, char *ptr, int len)
-{
-	HAL_UART_Transmit(&huart1, (uint8_t *)ptr, len, 1000);
-	return len;
-}
-#endif
 
 /* USER CODE END 0 */
 
@@ -708,65 +618,32 @@ int main(void)
   MX_USART1_UART_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-		HAL_Delay(20);
- OLED_Init();
-	// 禁用JTAG，释放PB3、PB4引脚作为普�?�GPIO
-	// 保留SWD调试功能（PA13/PA14�?
+	// 初始化OLED显示屏（暂时注释，排查停顿问题）
+	// HAL_Delay(20);
+	// OLED_Init();
+	
+	// 禁用JTAG，释放PB3、PB4引脚作为普通GPIO
+	// 保留SWD调试功能（PA13/PA14）
 	__HAL_AFIO_REMAP_SWJ_NOJTAG();
 	
-	// 等待串口稳定
-	HAL_Delay(100);
-	
-	// �????�????单的测试：发送单个字�????
-	UART_SendChar('A');
-	UART_SendChar('B');
-	UART_SendChar('C');
-	UART_SendChar('\r');
-	UART_SendChar('\n');
+	// 启动TIM1（用于超声波微秒延时�?
+	HAL_TIM_Base_Start(&htim1);
 	
 	// 启动PWM输出
 	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
 	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
 	
-	// 初始化PID控制�????
+	// 初始化PID控制器（添加积分项）
 	PID_Init(&pid, KP, KI, KD);
+	
+	// 初始化蓝牙模�?
+	Bluetooth_Init();
 	
 	// 初始化电机为停止状�??
 	Motor_Stop();
 	
-	// 测试串口字符串发�???
-	UART_SendString("\r\n=== STM32 Smart Car ===\r\n");
-	UART_SendString("UART Test OK!\r\n");
-	
-	// 测试GPIO寄存器配�???
-	char test_buffer[100];
-	sprintf(test_buffer, "GPIOB CRL: 0x%08lX\r\n", GPIOB->CRL);
-	UART_SendString(test_buffer);
-	sprintf(test_buffer, "GPIOB IDR: 0x%04X\r\n", GPIOB->IDR);
-	UART_SendString(test_buffer);
-	UART_SendString("\r\n");
-	
-	// 根据调试模式输出提示信息
-	#if DEBUG_ALL_PINS
-		UART_SendString("\r\n=== Test All GPIOB Pins ===\r\n");
-		UART_SendString("Move sensors to find which pins change!\r\n\r\n");
-		HAL_Delay(1000);
-	#elif DEBUG_IR_SENSOR
-		UART_SendString("\r\n=== IR Sensor Debug Mode ===\r\n");
-		UART_SendString("Sensor Order: [L-Out][L-In][Mid][R-In][R-Out]\r\n");
-		UART_SendString("1=Black Line, 0=White\r\n\r\n");
-		HAL_Delay(1000);
-	#elif DEBUG_MOTOR
-		UART_SendString("\r\n=== Motor Debug Mode ===\r\n");
-		UART_SendString("Test: Forward->Back->Left->Right\r\n\r\n");
-		HAL_Delay(2000);
-	#elif RUN_LINE_TRACK
-		UART_SendString("\r\n=== Line Tracking Mode ===\r\n");
-		UART_SendString("Starting PID Line Tracking...\r\n\r\n");
-		HAL_Delay(2000);
-	#else
-		UART_SendString("\r\n!!! Please Select Debug Mode !!!\r\n");
-	#endif
+	// 短暂延时，等待系统稳�?
+	HAL_Delay(500);
 	
   /* USER CODE END 2 */
 
@@ -774,44 +651,74 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-     OLED_NewFrame();
-	OLED_PrintString(1,1, "前进 运动 快数量：     倒计时：", 	&font16x16,0);
-		OLED_PrintASCIIString(48,16,"1",&afont16x8,0);
-		for(uint8_t i=0;i<=15;i++){
-			OLED_PrintASCIIString(64,33,"15",&afont16x8,0);
-    	OLED_ShowFrame();
-
-		}
-		OLED_ShowFrame();
-    HAL_Delay(20);
-
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
 		
-		#if DEBUG_ALL_PINS
-			// 测试�???有GPIOB引脚
-			Debug_All_GPIOB_Pins();
+		// 处理蓝牙命令
+		Bluetooth_Process();
+		
+		// 根据当前模式执行相应功能
+		switch(current_mode)
+		{
+			case MODE_STOP:
+				// 停止模式：什么都不做
+				Motor_Stop();
+				break;
+				
+			case MODE_LINE_TRACK:
+				// 循迹模式：执行PID循迹
+				Line_Tracking_PID();
+				break;
+				
+			case MODE_MANUAL:
+				// 手动模式：由蓝牙命令控制，这里不需要额外处理
+				break;
+				
+			case MODE_AVOID:
+				// 避障模式：预留，暂时停止
+				Motor_Stop();
+				break;
+				
+			default:
+				current_mode = MODE_STOP;
+				break;
+		}
+		
+		// 定时状态上报（每1秒）
+		static uint32_t last_report_time = 0;
+		if(HAL_GetTick() - last_report_time >= 1000)
+		{
+			last_report_time = HAL_GetTick();
 			
-		#elif DEBUG_IR_SENSOR
-			// 红外传感器调试模�???
-			Debug_IR_Sensors();
-			
-		#elif DEBUG_MOTOR
-			// 电机调试模式
-			Debug_Motor_Test();
-			
-		#elif RUN_LINE_TRACK
-			// PID循迹控制（实时执行）
-			Line_Tracking_PID();
-			// 不添加延时，保持连续控制，避免顿�???
-			
-		#else
-			// 默认：停止状�???
-			Motor_Stop();
-			HAL_Delay(1000);
-			UART_SendString("Please Select Debug Mode!\r\n");
-		#endif
+			// 根据模式上报状态
+			if(current_mode == MODE_LINE_TRACK)
+			{
+				// 循迹模式：上报前进状态
+				UART_SendString("STATUS:FORWARD\r\n");
+			}
+			else if(current_mode == MODE_MANUAL)
+			{
+				// 手动模式：上报手动状态
+				UART_SendString("STATUS:MANUAL\r\n");
+			}
+		}
+		
+		// 超声波调试：定时发送距离数据（每500ms）
+		// 取消注释以启用自动超声波调试
+		// static uint32_t last_ultrasonic_time = 0;
+		// if(HAL_GetTick() - last_ultrasonic_time >= 500)
+		// {
+		// 	last_ultrasonic_time = HAL_GetTick();
+		// 	Ultrasonic_SendDebugInfo();
+		// }
+		
+		// 可选：OLED显示当前状态
+		// OLED_NewFrame();
+		// char mode_str[20];
+		// sprintf(mode_str, "Mode: %d", current_mode);
+		// OLED_PrintASCIIString(0, 0, mode_str, &afont8x6, 0);
+		// OLED_ShowFrame();
 		
   }
   /* USER CODE END 3 */
@@ -856,6 +763,126 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+/**
+  * @brief  初始化蓝牙模�?
+  * @retval None
+  */
+void Bluetooth_Init(void)
+{
+	// 启动UART接收中断
+	HAL_UART_Receive_IT(&huart1, bt_rx_buffer, 1);
+}
+
+/**
+  * @brief  处理蓝牙命令
+  * @retval None
+  */
+void Bluetooth_Process(void)
+{
+	if(bt_command == 0) return;  // 没有新命�?
+	
+	uint8_t cmd = bt_command;
+	bt_command = 0;  // 清除命令
+	
+	switch(cmd)
+	{
+		// 模式切换
+		case '0':  // 停止模式
+			current_mode = MODE_STOP;
+			Motor_Stop();
+			break;
+			
+		case '1':  // 循迹模式
+			current_mode = MODE_LINE_TRACK;
+			pid.integral = 0.0f;  // 清空积分
+			break;
+			
+		case '2':  // 手动模式
+			current_mode = MODE_MANUAL;
+			break;
+		
+		// 手动控制（仅在手动模式下有效�?
+		case 'F':  // 前进
+		case 'f':
+			if(current_mode == MODE_MANUAL)
+				Motor_Forward(BASE_SPEED);
+			break;
+			
+		case 'B':  // 后�??
+		case 'b':
+			if(current_mode == MODE_MANUAL)
+				Motor_Backward(BASE_SPEED);
+			break;
+			
+		case 'L':  // 左转
+		case 'l':
+			if(current_mode == MODE_MANUAL)
+				Motor_TurnLeft(BASE_SPEED);
+			break;
+			
+		case 'R':  // 右转
+		case 'r':
+			if(current_mode == MODE_MANUAL)
+				Motor_TurnRight(BASE_SPEED);
+			break;
+			
+		case 'S':  // 停止
+		case 's':
+			Motor_Stop();
+			break;
+		
+		// 超声波测距（调试命令）
+		case 'U':  // 超声波测距
+		case 'u':
+			Ultrasonic_SendDebugInfo();
+			break;
+		
+		// 查询状态
+		case 'Q':  // 查询当前状态
+		case 'q':
+		{
+			char status_buffer[100];
+			sprintf(status_buffer, "MODE:%d,STATION:%d,STOP_TIME:%d\r\n", 
+			        current_mode, station_count, stop_time_seconds);
+			UART_SendString(status_buffer);
+			break;
+		}
+		
+		// 设置停靠时间（通过数字键1-9设置1-9秒，0设置为10秒）
+		case '1': case '2': case '3': case '4': case '5':
+		case '6': case '7': case '8': case '9':
+			// 如果在停止模式，可以设置停靠时间
+			if(current_mode == MODE_STOP)
+			{
+				stop_time_seconds = cmd - '0';  // ASCII转数字
+				char confirm[50];
+				sprintf(confirm, "STOP_TIME_SET:%d\r\n", stop_time_seconds);
+				UART_SendString(confirm);
+			}
+			break;
+		
+		default:
+			break;
+	}
+}
+
+/**
+  * @brief  UART接收完成回调函数
+  * @param  huart: UART句柄
+  * @retval None
+  */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+	if(huart->Instance == USART1)
+	{
+		// 保存接收到的命令
+		bt_command = bt_rx_buffer[0];
+		
+		// 重新启动接收
+		HAL_UART_Receive_IT(&huart1, bt_rx_buffer, 1);
+	}
+}
 
 /* USER CODE END 4 */
 

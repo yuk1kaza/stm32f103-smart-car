@@ -74,11 +74,13 @@ stm32f103_car_v1.0智能小车，集成L298N电机驱动、两个直流电机、
 - 加权误差计算
 - 差速转向控制
 - 全黑/全白智能处理
+- 站点停靠功能（10秒倒计时）
 
 ### 2. 蓝牙远程控制
 - HC-05蓝牙模块（波特率115200）
 - 多模式切换：停止/循迹/手动/避障
 - 手动遥控：前进/后退/左转/右转
+- 速度等级切换：慢速(20%)/中速(40%)/快速(60%)
 - 实时命令响应
 
 ### 3. 超声波测距
@@ -87,10 +89,21 @@ stm32f103_car_v1.0智能小车，集成L298N电机驱动、两个直流电机、
 - 微秒级精确延时（TIM1）
 - 串口调试输出
 
-### 4. OLED显示（可选）
-- 128x64 OLED屏幕
-- I2C接口
-- 实时状态显示
+### 4. OLED实时显示
+- 128x64 OLED屏幕（I2C接口）
+- 实时显示运动方向（前进/后退/左转/右转/停止）
+- 显示车速等级和百分比
+- 显示已停靠站点数
+- 停靠时显示倒计时（10秒递减）
+- 显示超声波距离
+- 刷新频率：200ms（5Hz）
+
+### 5. 高频状态上报
+- 上报频率：10Hz（每100ms）
+- 完整状态信息：模式、方向、速度、站点、距离
+- 数据格式：`STATUS:MODE=1,DIR=1,SPEED=1,STATION=3,DIST=25.3\r\n`
+- 带宽占用：~5%
+- 实时性：延迟<100ms
 
 ## 核心技术
 
@@ -176,7 +189,73 @@ right_speed = BASE_SPEED - PID_output
 | `L` | 左转 | 仅手动模式有效 |
 | `R` | 右转 | 仅手动模式有效 |
 | `S` | 停止 | 任何模式都可停止 |
+| `+` | 加速 | 提升速度等级 |
+| `-` | 减速 | 降低速度等级 |
+| `Q` | 查询状态 | 返回完整状态信息 |
 | `U` | 超声波测距 | 返回距离数据 |
+
+### OLED显示
+
+**显示内容**（4行信息）：
+```
+Dir: FORWARD      ← 运动方向
+Speed:MID 40%     ← 车速等级
+Stations: 3       ← 停靠站点数
+Dist: 25.3cm      ← 超声波距离
+```
+
+**停靠时显示**：
+```
+Dir: STOP         ← 停止状态
+Speed:MID 40%     ← 车速等级
+Stations: 3       ← 站点数+1
+Countdown: 7s     ← 倒计时递减
+```
+
+### 高频状态上报
+
+**数据格式**：
+```
+STATUS:MODE=1,DIR=1,SPEED=1,STATION=3,DIST=25.3\r\n
+```
+
+**字段说明**：
+- `MODE`: 运行模式（0=停止，1=循迹，2=手动，3=避障）
+- `DIR`: 运动方向（0=停止，1=前进，2=后退，3=左转，4=右转）
+- `SPEED`: 速度等级（0=慢速20%，1=中速40%，2=快速60%）
+- `STATION`: 已停靠站点数
+- `DIST`: 超声波距离（cm）
+
+**上报频率**：10Hz（每100ms一次）
+
+**Python解析示例**：
+```python
+import serial
+import re
+
+def parse_status(line):
+    pattern = r'STATUS:MODE=(\d+),DIR=(\d+),SPEED=(\d+),STATION=(\d+),DIST=([\d.]+)'
+    match = re.match(pattern, line)
+    if match:
+        return {
+            'mode': int(match.group(1)),
+            'direction': int(match.group(2)),
+            'speed': int(match.group(3)),
+            'station': int(match.group(4)),
+            'distance': float(match.group(5))
+        }
+    return None
+
+ser = serial.Serial('COM3', 115200)
+while True:
+    line = ser.readline().decode('utf-8').strip()
+    if line.startswith('STATUS:'):
+        data = parse_status(line)
+        if data:
+            print(f"模式:{data['mode']} 方向:{data['direction']} "
+                  f"速度:{data['speed']} 站点:{data['station']} "
+                  f"距离:{data['distance']:.1f}cm")
+```
 
 ### 超声波测距
 
@@ -341,7 +420,11 @@ stm32-smart-car/
 
 完整的更新日志请查看 [CHANGELOG.md](CHANGELOG.md)
 
-### v1.2.0 (2025-12-11) - 当前版本
+### v1.2.0 (2025-12-17) - 当前版本
+- ✨ 新增OLED实时显示功能（方向、速度、站点、倒计时）
+- ✨ 新增高频状态上报（10Hz，完整状态信息）
+- ✨ 新增速度等级切换功能（慢速/中速/快速）
+- ✨ 新增站点停靠倒计时显示
 - 📝 添加完整的项目需求与解决方案文档
 - 📝 完善Git协作规范（分支合并详解）
 - 🐛 修复循迹左转问题和传感器权重错误

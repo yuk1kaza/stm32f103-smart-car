@@ -64,6 +64,31 @@ typedef enum{
 	MODE_MANUAL,        // 手动模式（蓝牙控制）
 	MODE_AVOID          // 避障模式（预留）
 }RunMode;
+
+// 运动方向枚举
+typedef enum {
+	DIR_STOP = 0,
+	DIR_FORWARD,
+	DIR_BACKWARD,
+	DIR_LEFT,
+	DIR_RIGHT
+} Direction;
+
+// 车速等级枚举
+typedef enum {
+	SPEED_SLOW = 0,    // 慢速：2000 (20%)
+	SPEED_MEDIUM,      // 中速：4000 (40%)
+	SPEED_FAST         // 快速：6000 (60%)
+} SpeedLevel;
+
+// 系统状态结构体
+typedef struct {
+	Direction direction;      // 当前运动方向
+	SpeedLevel speed_level;   // 车速等级
+	uint16_t station_count;   // 停靠站点数
+	uint8_t countdown;        // 倒计时（秒）
+	uint8_t is_stopped;       // 是否停靠中
+} SystemStatus;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -118,9 +143,11 @@ uint8_t bt_command = 0;
 // 超声波测距变量
 float ultrasonic_distance = 0.0f;  // 当前测量距离（cm）
 
-// 站点停靠相关变量
-uint16_t station_count = 0;        // 已停靠站点数
-uint8_t stop_time_seconds = 10;    // 停靠时间（秒），可通过上位机设置
+// 系统状态实例
+SystemStatus sys_status = {DIR_STOP, SPEED_MEDIUM, 0, 0, 0};
+
+// 站点停靠时间（秒），可通过上位机设置
+uint8_t stop_time_seconds = 10;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -143,8 +170,8 @@ void PID_Init(PID_Controller *pid, float kp, float ki, float kd);
 int PID_Calculate(PID_Controller *pid, int error);
 void Line_Tracking_PID(void);
 
-// 站点停靠函数
-void Station_Stop(uint8_t stop_seconds);
+// 站点停靠函数（已废弃，使用Station_Stop_With_Countdown代替）
+// void Station_Stop(uint8_t stop_seconds);
 
 // 蓝牙控制函数
 void Bluetooth_Init(void);
@@ -157,6 +184,12 @@ void Ultrasonic_SendDebugInfo(void);
 
 // 串口发送函数
 void UART_SendString(const char *str);
+
+// OLED显示函数
+void OLED_UpdateStatus(void);
+uint16_t Get_Speed_Percent(SpeedLevel level);
+uint16_t Get_Speed_Value(SpeedLevel level);
+void Station_Stop_With_Countdown(uint8_t stop_time);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -177,6 +210,9 @@ void Motor_Stop(void)
 	HAL_GPIO_WritePin(GPIOA, IN2_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(GPIOA, IN3_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(GPIOA, IN4_Pin, GPIO_PIN_RESET);
+	
+	// 更新状态
+	sys_status.direction = DIR_STOP;
 }
 
 /**
@@ -197,6 +233,9 @@ void Motor_Forward(uint16_t speed)
 	// 设置PWM占空比
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed);
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, speed);
+	
+	// 更新状态
+	sys_status.direction = DIR_FORWARD;
 }
 
 /**
@@ -217,6 +256,9 @@ void Motor_Backward(uint16_t speed)
 	// 设置PWM占空比
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed);
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, speed);
+	
+	// 更新状态
+	sys_status.direction = DIR_BACKWARD;
 }
 
 /**
@@ -237,6 +279,9 @@ void Motor_TurnLeft(uint16_t speed)
 	// 设置PWM占空比
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed);
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, speed);
+	
+	// 更新状态
+	sys_status.direction = DIR_LEFT;
 }
 
 /**
@@ -257,6 +302,9 @@ void Motor_TurnRight(uint16_t speed)
 	// 设置PWM占空比
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, speed);
 	__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, speed);
+	
+	// 更新状态
+	sys_status.direction = DIR_RIGHT;
 }
 
 /**
@@ -400,29 +448,10 @@ int PID_Calculate(PID_Controller *pid, int error)
 }
 
 /**
-  * @brief  站点停靠功能（停靠指定时间）
-  * @param  stop_seconds: 停靠时间（秒）
-  * @retval None
+  * @brief  站点停靠功能（旧版本，已废弃）
+  * @note   此函数已被Station_Stop_With_Countdown替代，新版本支持OLED倒计时显示
   */
-void Station_Stop(uint8_t stop_seconds)
-{
-	Motor_Stop();
-	station_count++;  // 站点数+1
-	
-	// 上报停靠状态
-	char buffer[50];
-	sprintf(buffer, "STATUS:STOP,STATION:%d\r\n", station_count);
-	UART_SendString(buffer);
-	
-	// 停靠指定时间
-	HAL_Delay(stop_seconds * 1000);
-	
-	// 清空PID积分
-	pid.integral = 0.0f;
-	
-	// 上报恢复前进状态
-	UART_SendString("STATUS:FORWARD\r\n");
-}
+// 此函数已废弃，请使用Station_Stop_With_Countdown
 
 /**
   * @brief  基于PID的循迹控制（添加积分项，优化全白/全黑处理，支持站点停靠）
@@ -432,10 +461,10 @@ void Line_Tracking_PID(void)
 {
 	int8_t sensors = Read_IR_Sensors();
 	
-	// 检测全黑（站点）：停靠指定时间
+	// 检测全黑（站点）：停靠10秒并显示倒计时
 	if(sensors == 0x1F)  // 0b11111
 	{
-		Station_Stop(stop_time_seconds);
+		Station_Stop_With_Countdown(10);  // 停靠10秒
 		return;
 	}
 	
@@ -447,8 +476,9 @@ void Line_Tracking_PID(void)
 		int motor_adjust = (int)(pid.Kp * pid.last_error + 
 		                         pid.Kd * (0 - pid.last_error));
 		
-		int16_t left_speed = BASE_SPEED + motor_adjust;
-		int16_t right_speed = BASE_SPEED - motor_adjust;
+		uint16_t base_speed = Get_Speed_Value(sys_status.speed_level);
+		int16_t left_speed = base_speed + motor_adjust;
+		int16_t right_speed = base_speed - motor_adjust;
 		
 		// 限幅（允许速度降到0）
 		if(left_speed > PWM_SPEED_MAX) left_speed = PWM_SPEED_MAX;
@@ -457,6 +487,7 @@ void Line_Tracking_PID(void)
 		if(right_speed < 0) right_speed = 0;
 		
 		Motor_DifferentialSpeed(left_speed, right_speed);
+		sys_status.direction = DIR_FORWARD;
 		return;
 	}
 	
@@ -467,10 +498,9 @@ void Line_Tracking_PID(void)
 	int motor_adjust = PID_Calculate(&pid, error);
 	
 	// 根据PID输出调整左右电机速度
-	// leftSpeed = baseSpeed + motorAdjust
-	// rightSpeed = baseSpeed - motorAdjust
-	int16_t left_speed = BASE_SPEED + motor_adjust;
-	int16_t right_speed = BASE_SPEED - motor_adjust;
+	uint16_t base_speed = Get_Speed_Value(sys_status.speed_level);
+	int16_t left_speed = base_speed + motor_adjust;
+	int16_t right_speed = base_speed - motor_adjust;
 	
 	// 限幅（允许速度降到0，实现更大的转向差速）
 	if(left_speed > PWM_SPEED_MAX) left_speed = PWM_SPEED_MAX;
@@ -480,6 +510,11 @@ void Line_Tracking_PID(void)
 	
 	// 差速控制
 	Motor_DifferentialSpeed(left_speed, right_speed);
+	
+	// 更新运动方向
+	if(error < -20) sys_status.direction = DIR_LEFT;
+	else if(error > 20) sys_status.direction = DIR_RIGHT;
+	else sys_status.direction = DIR_FORWARD;
 }
 
 /**
@@ -573,6 +608,116 @@ void Ultrasonic_SendDebugInfo(void)
 	UART_SendString(buffer);
 }
 
+/**
+  * @brief  获取速度百分比
+  * @param  level: 速度等级
+  * @retval 速度百分比
+  */
+uint16_t Get_Speed_Percent(SpeedLevel level)
+{
+	switch(level)
+	{
+		case SPEED_SLOW:   return 20;
+		case SPEED_MEDIUM: return 40;
+		case SPEED_FAST:   return 60;
+		default:           return 0;
+	}
+}
+
+/**
+  * @brief  获取速度值
+  * @param  level: 速度等级
+  * @retval PWM速度值
+  */
+uint16_t Get_Speed_Value(SpeedLevel level)
+{
+	switch(level)
+	{
+		case SPEED_SLOW:   return 2000;
+		case SPEED_MEDIUM: return 4000;
+		case SPEED_FAST:   return 6000;
+		default:           return 0;
+	}
+}
+
+/**
+  * @brief  更新OLED显示状态
+  * @retval None
+  */
+void OLED_UpdateStatus(void)
+{
+	OLED_NewFrame();
+	char buffer[32];
+	
+	// 第1行：运动方向
+	const char* dir_str[] = {"STOP", "FORWARD", "BACK", "LEFT", "RIGHT"};
+	sprintf(buffer, "Dir: %s", dir_str[sys_status.direction]);
+	OLED_PrintASCIIString(0, 0, buffer, &afont8x6, OLED_COLOR_NORMAL);
+	
+	// 第2行：车速等级
+	const char* speed_str[] = {"SLOW", "MID", "FAST"};
+	uint16_t speed_percent = Get_Speed_Percent(sys_status.speed_level);
+	sprintf(buffer, "Speed:%s %d%%", speed_str[sys_status.speed_level], speed_percent);
+	OLED_PrintASCIIString(0, 16, buffer, &afont8x6, OLED_COLOR_NORMAL);
+	
+	// 第3行：站点数量
+	sprintf(buffer, "Stations: %d", sys_status.station_count);
+	OLED_PrintASCIIString(0, 32, buffer, &afont8x6, OLED_COLOR_NORMAL);
+	
+	// 第4行：倒计时（仅停靠时显示）
+	if(sys_status.is_stopped)
+	{
+		sprintf(buffer, "Countdown: %ds", sys_status.countdown);
+		OLED_PrintASCIIString(0, 48, buffer, &afont8x6, OLED_COLOR_NORMAL);
+	}
+	else
+	{
+		// 显示超声波距离
+		if(ultrasonic_distance > 0)
+		{
+			sprintf(buffer, "Dist: %.1fcm", ultrasonic_distance);
+			OLED_PrintASCIIString(0, 48, buffer, &afont8x6, OLED_COLOR_NORMAL);
+		}
+	}
+	
+	OLED_ShowFrame();
+}
+
+/**
+  * @brief  站点停靠（带倒计时）
+  * @param  stop_time: 停靠时间（秒）
+  * @retval None
+  */
+void Station_Stop_With_Countdown(uint8_t stop_time)
+{
+	Motor_Stop();
+	sys_status.is_stopped = 1;
+	sys_status.station_count++;  // 站点数+1
+	sys_status.direction = DIR_STOP;
+	
+	// 上报停靠状态
+	char buffer[50];
+	sprintf(buffer, "STATUS:STOP,STATION:%d\r\n", sys_status.station_count);
+	UART_SendString(buffer);
+	
+	// 倒计时
+	for(uint8_t i = stop_time; i > 0; i--)
+	{
+		sys_status.countdown = i;
+		OLED_UpdateStatus();  // 更新显示
+		HAL_Delay(1000);  // 延时1秒
+	}
+	
+	sys_status.is_stopped = 0;
+	sys_status.countdown = 0;
+	
+	// 清空PID积分
+	pid.integral = 0.0f;
+	
+	// 恢复前进
+	sys_status.direction = DIR_FORWARD;
+	UART_SendString("STATUS:FORWARD\r\n");
+}
 
 /* USER CODE END 0 */
 
@@ -610,9 +755,15 @@ int main(void)
   MX_USART1_UART_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-	// 初始化OLED显示屏（暂时注释，排查停顿问题）
-	// HAL_Delay(20);
-	// OLED_Init();
+	// 初始化OLED显示屏
+	HAL_Delay(20);
+	OLED_Init();
+	
+	// 显示启动信息
+	OLED_NewFrame();
+	OLED_PrintASCIIString(0, 0, "STM32 Car v1.2", &afont8x6, OLED_COLOR_NORMAL);
+	OLED_PrintASCIIString(0, 16, "Initializing...", &afont8x6, OLED_COLOR_NORMAL);
+	OLED_ShowFrame();
 	
 	// 禁用JTAG，释放PB3、PB4引脚作为普通GPIO
 	// 保留SWD调试功能（PA13/PA14）
@@ -677,40 +828,40 @@ int main(void)
 				break;
 		}
 		
-		// 定时状态上报（每1秒）
+		// 高频状态上报（每100ms，10Hz）
 		static uint32_t last_report_time = 0;
-		if(HAL_GetTick() - last_report_time >= 1000)
+		if(HAL_GetTick() - last_report_time >= 100)
 		{
 			last_report_time = HAL_GetTick();
 			
-			// 根据模式上报状态
-			if(current_mode == MODE_LINE_TRACK)
-			{
-				// 循迹模式：上报前进状态
-				UART_SendString("STATUS:FORWARD\r\n");
-			}
-			else if(current_mode == MODE_MANUAL)
-			{
-				// 手动模式：上报手动状态
-				UART_SendString("STATUS:MANUAL\r\n");
-			}
+			// 构建完整状态信息
+			char status_buffer[80];
+			sprintf(status_buffer, "STATUS:MODE=%d,DIR=%d,SPEED=%d,STATION=%d,DIST=%.1f\r\n",
+			        current_mode,
+			        sys_status.direction,
+			        sys_status.speed_level,
+			        sys_status.station_count,
+			        ultrasonic_distance > 0 ? ultrasonic_distance : 0.0f);
+			UART_SendString(status_buffer);
 		}
 		
-		// 超声波调试：定时发送距离数据（每500ms）
-		// 取消注释以启用自动超声波调试
-		// static uint32_t last_ultrasonic_time = 0;
-		// if(HAL_GetTick() - last_ultrasonic_time >= 500)
-		// {
-		// 	last_ultrasonic_time = HAL_GetTick();
-		// 	Ultrasonic_SendDebugInfo();
-		// }
 		
-		// 可选：OLED显示当前状态
-		// OLED_NewFrame();
-		// char mode_str[20];
-		// sprintf(mode_str, "Mode: %d", current_mode);
-		// OLED_PrintASCIIString(0, 0, mode_str, &afont8x6, 0);
-		// OLED_ShowFrame();
+		
+		// OLED显示当前状态（每200ms刷新一次）
+		static uint32_t last_oled_time = 0;
+		if(HAL_GetTick() - last_oled_time >= 200)
+		{
+			last_oled_time = HAL_GetTick();
+			OLED_UpdateStatus();
+		}
+		
+		// 超声波测距（每500ms测一次）
+		static uint32_t last_ultrasonic_time = 0;
+		if(HAL_GetTick() - last_ultrasonic_time >= 500)
+		{
+			last_ultrasonic_time = HAL_GetTick();
+			ultrasonic_distance = Ultrasonic_GetDistance();
+		}
 		
   }
   /* USER CODE END 3 */
@@ -819,30 +970,51 @@ void Bluetooth_Process(void)
 		case 'F':  // 前进
 		case 'f':
 			if(current_mode == MODE_MANUAL)
-				Motor_Forward(BASE_SPEED);
+				Motor_Forward(Get_Speed_Value(sys_status.speed_level));
 			break;
 			
 		case 'B':  // 后退
 		case 'b':
 			if(current_mode == MODE_MANUAL)
-				Motor_Backward(BASE_SPEED);
+				Motor_Backward(Get_Speed_Value(sys_status.speed_level));
 			break;
 			
 		case 'L':  // 左转
 		case 'l':
 			if(current_mode == MODE_MANUAL)
-				Motor_TurnLeft(BASE_SPEED);
+				Motor_TurnLeft(Get_Speed_Value(sys_status.speed_level));
 			break;
 			
 		case 'R':  // 右转
 		case 'r':
 			if(current_mode == MODE_MANUAL)
-				Motor_TurnRight(BASE_SPEED);
+				Motor_TurnRight(Get_Speed_Value(sys_status.speed_level));
 			break;
 			
 		case 'S':  // 停止
 		case 's':
 			Motor_Stop();
+			break;
+		
+		// 速度等级切换
+		case '+':  // 加速
+			if(sys_status.speed_level < SPEED_FAST)
+			{
+				sys_status.speed_level++;
+				char buffer[30];
+				sprintf(buffer, "SPEED:%d\r\n", sys_status.speed_level);
+				UART_SendString(buffer);
+			}
+			break;
+			
+		case '-':  // 减速
+			if(sys_status.speed_level > SPEED_SLOW)
+			{
+				sys_status.speed_level--;
+				char buffer[30];
+				sprintf(buffer, "SPEED:%d\r\n", sys_status.speed_level);
+				UART_SendString(buffer);
+			}
 			break;
 		
 		// 超声波测距（调试命令）
@@ -856,8 +1028,8 @@ void Bluetooth_Process(void)
 		case 'q':
 		{
 			char status_buffer[100];
-			sprintf(status_buffer, "MODE:%d,STATION:%d,STOP_TIME:%d\r\n", 
-			        current_mode, station_count, stop_time_seconds);
+			sprintf(status_buffer, "MODE:%d,DIR:%d,SPEED:%d,STATION:%d\r\n", 
+			        current_mode, sys_status.direction, sys_status.speed_level, sys_status.station_count);
 			UART_SendString(status_buffer);
 			break;
 		}

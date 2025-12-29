@@ -1155,6 +1155,8 @@ void Bluetooth_Process(void)
 	// 数字键0-9的处理（仅用于模式切换）
 	if(cmd >= '0' && cmd <= '9')
 	{
+		// 切换模式前先停止电机，防止旧模式的状态带入新模式
+		Motor_Stop();
 		// 切换模式
 		switch(cmd)
 		{
@@ -1203,8 +1205,8 @@ void Bluetooth_Process(void)
 				Motor_TurnRight(Get_Speed_Value(sys_status.speed_level));
 			break;
 			
-		case 'S':  // 停止
-		case 's':
+		case 'Z':  // 停止
+		case 'z':
 			Motor_Stop();
 			break;
 		
@@ -1293,17 +1295,30 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 				Process_Multi_Char_Command();
 			}
 		}
-		// 检查是否是大写字母（可能是多字符命令的开始）
+		// 检查是否是大写字母
 		else if(received_char >= 'A' && received_char <= 'Z')
 		{
-			// 如果缓冲区为空，开始新命令
-			if(cmd_index == 0)
+			// 检查是否是单字符运动命令（F/B/L/R/Z/U/P/Q等）
+			// 这些命令需要立即执行，不应缓存
+			if(received_char == 'F' || received_char == 'B' || received_char == 'L' ||
+			   received_char == 'R' || received_char == 'Z' || received_char == 'U' ||
+			   received_char == 'P' || received_char == 'Q')
 			{
+				// 清空多字符命令缓冲区
+				cmd_index = 0;
+				memset(cmd_buffer, 0, CMD_BUFFER_SIZE);
+				// 作为单字符命令立即处理
+				bt_command = received_char;
+			}
+			// 其他大写字母可能是多字符命令的开始（如ST）
+			else if(cmd_index == 0)
+			{
+				// 缓冲区为空，开始新命令
 				cmd_buffer[cmd_index++] = received_char;
 			}
-			// 如果缓冲区已有内容，继续添加
 			else if(cmd_index < CMD_BUFFER_SIZE - 1)
 			{
+				// 缓冲区已有内容，继续添加
 				cmd_buffer[cmd_index++] = received_char;
 			}
 		}

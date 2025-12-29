@@ -60,9 +60,9 @@ typedef struct{
 // 运行模式枚举
 typedef enum{
 	MODE_STOP = 0,      // 停止模式
-	MODE_LINE_TRACK,    // 循迹模式
+	MODE_LINE_TRACK,    // 循迹模式（含自动避障）
 	MODE_MANUAL,        // 手动模式（蓝牙控制）
-	MODE_AVOID          // 避障模式（预留）
+	MODE_AVOID          // 避障模式（独立使用，已集成至循迹模式）
 }RunMode;
 
 // 运动方向枚举
@@ -76,9 +76,9 @@ typedef enum {
 
 // 车速等级枚举
 typedef enum {
-	SPEED_SLOW = 0,    // 慢速：2000 (20%)
-	SPEED_MEDIUM,      // 中速：4000 (40%)
-	SPEED_FAST         // 快速：6000 (60%)
+	SPEED_SLOW = 0,    // 慢速
+	SPEED_MEDIUM,      // 中速
+	SPEED_FAST         // 快速
 } SpeedLevel;
 
 // 系统状态结构体
@@ -94,11 +94,11 @@ typedef struct {
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 // PWM占空比定义（0-9999）
-#define PWM_SPEED_MAX    4300   // 最大速度：100%
+#define PWM_SPEED_MAX    4300   // 最大速度：43%
 
 
 // 循迹基础速度
-#define BASE_SPEED       3500   // 循迹基础速度：40%da
+#define BASE_SPEED       3500   // 循迹基础速度：35%
 
 // PID参数（根据STM32 PWM范围调整）
 #define KP               45.0f  // 比例系数（调整为适合0-9999范围）
@@ -477,7 +477,7 @@ int PID_Calculate(PID_Controller *pid, int error)
 }
 
 /**
-  * @brief  执行避障机动（右转90度→左向前进）
+  * @brief  执行避障机动（右转90度→斜向前进→回归循迹）
   * @retval 1=需要继续避障, 0=可以返回循迹
   */
 uint8_t Execute_Avoidance_Maneuver(void)
@@ -489,28 +489,29 @@ uint8_t Execute_Avoidance_Maneuver(void)
 	sprintf(buffer, "AVOID:START,DEPTH=%d\r\n", avoid_depth);
 	UART_SendString(buffer);
 	
-	// 1. 右转90度
+	// 1. 右转90度，绕过障碍物
 	Motor_TurnRight(3000);
 	sys_status.direction = DIR_RIGHT;
 	OLED_UpdateStatus();
 	HAL_Delay(TURN_90_TIME);
 	
-	// 2. 偏左运动
+	// 2. 斜向前进（左速<右速，实现左偏），等待检测到轨道
 	while (Read_IR_Sensors() == 0) {
+		// 如果前方距离仍然不安全，继续右转
 		if(ultrasonic_distance > 0 && ultrasonic_distance < SAFE_DISTANCE)
-	{
-		// 距离仍然不安全
-		Motor_TurnRight(6000);
-		sys_status.direction = DIR_RIGHT;
-		OLED_UpdateStatus();
-		HAL_Delay(TURN_90_TIME);
-	}
+		{
+			Motor_TurnRight(6000);
+			sys_status.direction = DIR_RIGHT;
+			OLED_UpdateStatus();
+			HAL_Delay(TURN_90_TIME);
+		}
 		
-		Motor_DifferentialSpeed(2500, 3500);
+		// 左电机慢、右电机快，实现斜向左前进
+		Motor_DifferentialSpeed(2000, 3000);
 	}
     
-	//3. 回归循迹
-	Line_Tracking_PID(void)
+	// 3. 回归循迹（已检测到轨道）
+	Line_Tracking_PID();
 
 
 	// 4. 停止并测距
@@ -590,11 +591,6 @@ void Line_Tracking_With_Avoidance(void)
 	Line_Tracking_PID();
 }
 
-/**
-  * @brief  站点停靠功能（旧版本，已废弃）
-  * @note   此函数已被Station_Stop_With_Countdown替代，新版本支持OLED倒计时显示
-  */
-// 此函数已废弃，请使用Station_Stop_With_Countdown
 
 /**
   * @brief  基于PID的循迹控制（添加积分项，优化全白/全黑处理，支持站点停靠，反向清零逻辑）
@@ -609,7 +605,7 @@ void Line_Tracking_PID(void)
 	{
 		Motor_Stop();
 		Motor_Forward(3000);
-		HAL_Delay(300);  // 稳定一下
+		HAL_Delay(400);  // 稳定一下
 		if (Read_IR_Sensors() == 0x1F) {
 		Station_Stop_With_Countdown(stop_time_seconds);  // 使用设置的停靠时间
 		}
@@ -648,7 +644,7 @@ void Line_Tracking_PID(void)
 	if(pid.last_error < -20)  // 上次是左转（偏左）
 	{
 		// 检查右侧传感器（右内或右外）是否检测到黑线
-		if((sensors & 0x02) || (sensors & 0x01))  // 右内(bit1)或右外(bit0)
+		if(HAL_GPIO_ReadPin(GPIOB, RIGHT2_Pin) == GPIO_PIN_SET || HAL_GPIO_ReadPin(GPIOB, RIGHT1_Pin) == GPIO_PIN_SET)  // 右内(bit1)或右外(bit0)
 		{
 			// 右侧检测到黑线，说明已经回到轨道，清零误差和积分
 			error = 0;
@@ -659,7 +655,7 @@ void Line_Tracking_PID(void)
 	else if(pid.last_error > 20)  // 上次是右转（偏右）
 	{
 		// 检查左侧传感器（左内或左外）是否检测到黑线
-		if((sensors & 0x08) || (sensors & 0x10))  // 左内(bit3)或左外(bit4)
+		if(HAL_GPIO_ReadPin(GPIOB, LEFT2_Pin) == GPIO_PIN_SET|| HAL_GPIO_ReadPin(GPIOB, LEFT1_Pin) == GPIO_PIN_SET)  // 左内(bit3)或左外(bit4)
 		{
 			// 左侧检测到黑线，说明已经回到轨道，清零误差和积分
 			error = 0;
@@ -807,9 +803,9 @@ uint16_t Get_Speed_Value(SpeedLevel level)
 {
 	switch(level)
 	{
-		case SPEED_SLOW:   return 3000;
-		case SPEED_MEDIUM: return 3500;
-		case SPEED_FAST:   return 3500;
+		case SPEED_SLOW:   return 3000;    // 30%
+		case SPEED_MEDIUM: return 3500;    // 35%
+		case SPEED_FAST:   return 4500;    // 45%
 		default:           return 0;
 	}
 }
@@ -901,7 +897,7 @@ void Station_Stop_With_Countdown(uint8_t stop_time)
 	// 恢复前进
 	sys_status.direction = DIR_FORWARD;
 	Motor_Forward(3000);
-	HAL_Delay(500);  // 稳定一下
+	HAL_Delay(600);  // 稳定一下
 	UART_SendString("STATUS=FORWARD\r\n");
 }
 
@@ -996,7 +992,7 @@ int main(void)
 				break;
 				
 			case MODE_LINE_TRACK:
-				// 循迹模式：执行带避障的PID循迹
+				// 循迹模式：执行带避障的PID循迹控制
 				Line_Tracking_With_Avoidance();
 				break;
 				

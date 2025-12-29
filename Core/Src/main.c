@@ -94,32 +94,38 @@ typedef struct {
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 // PWM占空比定义（0-9999）
-#define PWM_SPEED_MAX    9999   // 最大速度：100%
-#define PWM_SPEED_MIN    500      // 最小速度：5%
+#define PWM_SPEED_MAX    4300   // 最大速度：100%
+
 
 // 循迹基础速度
-#define BASE_SPEED       4000   // 循迹基础速度：40%da
+#define BASE_SPEED       3500   // 循迹基础速度：40%da
 
 // PID参数（根据STM32 PWM范围调整）
-#define KP               15.0f  // 比例系数（调整为适合0-9999范围）
+#define KP               45.0f  // 比例系数（调整为适合0-9999范围）
 #define KI               0.05f  // 积分系数（小值，避免积分饱和）
-#define KD               15.0f  // 微分系数（增大以抑制震荡）
+#define KD               30.0f  // 微分系数（增大以抑制震荡）
 
 // 积分限幅（防止积分饱和）
 #define INTEGRAL_MAX     200.0f
 
 // 红外传感器权重（根据STM32 PWM范围调整）
 // 权重需要与PWM范围匹配，使得调整量在合理范围内
-// 左外(-80) 左内(-40) 中间(0) 右内(40) 右外(80)
-#define WEIGHT_LEFT_OUT  -80
-#define WEIGHT_LEFT_IN   -40
+// 左外(-800) 左内(-80) 中间(0) 右内(80) 右外(800)
+#define WEIGHT_LEFT_OUT  -220
+#define WEIGHT_LEFT_IN   -200
 #define WEIGHT_MID        0
-#define WEIGHT_RIGHT_IN   40
-#define WEIGHT_RIGHT_OUT  80
+#define WEIGHT_RIGHT_IN   200
+#define WEIGHT_RIGHT_OUT  220
 
 // 超声波测距参数
 #define ULTRASONIC_TIMEOUT  30000   // 超时时间（微秒）：对应最大距离约5米
 #define SOUND_SPEED         0.034f  // 声速：0.034 cm/us (340m/s)
+
+// 避障参数
+#define SAFE_DISTANCE       10.0f   // 安全距离（cm）
+#define TURN_90_TIME        600     // 90度转向时间（ms）
+#define FORWARD_TIME        1000    // 避障前进时间（ms）
+#define MAX_AVOID_DEPTH     3       // 最大递归避障次数
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -140,8 +146,18 @@ RunMode current_mode = MODE_LINE_TRACK;  // 默认循迹模式
 uint8_t bt_rx_buffer[1];
 uint8_t bt_command = 0;
 
+// 多字符命令缓冲区（用于接收STxx等命令）
+#define CMD_BUFFER_SIZE 10
+char cmd_buffer[CMD_BUFFER_SIZE];
+uint8_t cmd_index = 0;
+uint32_t last_rx_time = 0;
+
 // 超声波测距变量
 float ultrasonic_distance = 0.0f;  // 当前测量距离（cm）
+
+// 避障状态变量
+uint8_t is_avoiding = 0;           // 是否正在避障
+uint8_t avoid_depth = 0;           // 当前避障递归深度
 
 // 系统状态实例
 SystemStatus sys_status = {DIR_STOP, SPEED_MEDIUM, 0, 0, 0};
@@ -176,6 +192,7 @@ void Line_Tracking_PID(void);
 // 蓝牙控制函数
 void Bluetooth_Init(void);
 void Bluetooth_Process(void);
+void Process_Multi_Char_Command(void);
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart);
 
 // 超声波测距函数
@@ -190,6 +207,10 @@ void OLED_UpdateStatus(void);
 uint16_t Get_Speed_Percent(SpeedLevel level);
 uint16_t Get_Speed_Value(SpeedLevel level);
 void Station_Stop_With_Countdown(uint8_t stop_time);
+
+// 避障函数
+uint8_t Execute_Avoidance_Maneuver(void);
+void Line_Tracking_With_Avoidance(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -421,7 +442,7 @@ void PID_Init(PID_Controller *pid, float kp, float ki, float kd)
 }
 
 /**
-  * @brief  PID计算（添加积分项）
+  * @brief  PID计算（添加积分项和抗饱和机制）
   * @param  pid: PID控制器指针
   * @param  error: 当前误差
   * @retval PID输出值
@@ -431,10 +452,18 @@ int PID_Calculate(PID_Controller *pid, int error)
 	// 保存当前误差
 	pid->error = error;
 	
-	// 计算积分项（带限幅，防止积分饱和）
-	pid->integral += (float)error;
-	if(pid->integral > INTEGRAL_MAX) pid->integral = INTEGRAL_MAX;
-	if(pid->integral < -INTEGRAL_MAX) pid->integral = -INTEGRAL_MAX;
+	// 误差接近0时，清空积分（防止积分累积）
+	if(error > -10 && error < 10)
+	{
+		pid->integral *= 0.5f;  // 快速衰减积分
+	}
+	else
+	{
+		// 计算积分项（带限幅，防止积分饱和）
+		pid->integral += (float)error;
+		if(pid->integral > INTEGRAL_MAX) pid->integral = INTEGRAL_MAX;
+		if(pid->integral < -INTEGRAL_MAX) pid->integral = -INTEGRAL_MAX;
+	}
 	
 	// PID计算：output = Kp*error + Ki*integral + Kd*(error - last_error)
 	pid->output = (int)(pid->Kp * pid->error + 
@@ -448,23 +477,143 @@ int PID_Calculate(PID_Controller *pid, int error)
 }
 
 /**
+  * @brief  执行避障机动（右转90度→左向前进）
+  * @retval 1=需要继续避障, 0=可以返回循迹
+  */
+uint8_t Execute_Avoidance_Maneuver(void)
+{
+	uint16_t speed = Get_Speed_Value(sys_status.speed_level);
+	
+	// 上报避障开始
+	char buffer[50];
+	sprintf(buffer, "AVOID:START,DEPTH=%d\r\n", avoid_depth);
+	UART_SendString(buffer);
+	
+	// 1. 右转90度
+	Motor_TurnRight(3000);
+	sys_status.direction = DIR_RIGHT;
+	OLED_UpdateStatus();
+	HAL_Delay(TURN_90_TIME);
+	
+	// 2. 偏左运动
+	while (Read_IR_Sensors() == 0) {
+		if(ultrasonic_distance > 0 && ultrasonic_distance < SAFE_DISTANCE)
+	{
+		// 距离仍然不安全
+		Motor_TurnRight(6000);
+		sys_status.direction = DIR_RIGHT;
+		OLED_UpdateStatus();
+		HAL_Delay(TURN_90_TIME);
+	}
+		
+		Motor_DifferentialSpeed(2500, 3500);
+	}
+    
+	//3. 回归循迹
+	Line_Tracking_PID(void)
+
+
+	// 4. 停止并测距
+	Motor_Stop();
+	HAL_Delay(100);  // 稳定一下
+	
+	// 5. 测量新距离
+	ultrasonic_distance = Ultrasonic_GetDistance();
+	
+	// 6. 判断是否需要继续避障
+	if(ultrasonic_distance > 0 && ultrasonic_distance < SAFE_DISTANCE)
+	{
+		// 距离仍然不安全
+		sprintf(buffer, "AVOID:CONTINUE,DIST=%.1f\r\n", ultrasonic_distance);
+		UART_SendString(buffer);
+		return 1;  // 需要继续避障
+	}
+	else
+	{
+		sprintf(buffer, "AVOID:END,DIST=%.1f\r\n", ultrasonic_distance);
+		UART_SendString(buffer);
+		return 0;  // 返回循迹
+	}
+}
+
+/**
+  * @brief  带避障功能的循迹控制
+  * @retval None
+  */
+void Line_Tracking_With_Avoidance(void)
+{
+	// 检查是否需要避障（距离小于安全值）
+	if(ultrasonic_distance > 0 && ultrasonic_distance < SAFE_DISTANCE && !is_avoiding)
+	{
+		// 触发避障
+		is_avoiding = 1;
+		avoid_depth = 0;
+		
+		// 停止当前运动
+		Motor_Stop();
+		HAL_Delay(200);
+		
+		// 递归避障，直到安全或达到最大次数
+		while(avoid_depth < MAX_AVOID_DEPTH)
+		{
+			avoid_depth++;
+			
+			// 执行避障机动
+			uint8_t need_continue = Execute_Avoidance_Maneuver();
+			
+			if(!need_continue)
+			{
+				// 安全了，退出避障
+				break;
+			}
+			
+			// 如果达到最大深度，强制退出
+			if(avoid_depth >= MAX_AVOID_DEPTH)
+			{
+				UART_SendString("AVOID:MAX_DEPTH_REACHED\r\n");
+				break;
+			}
+		}
+		
+		// 避障结束，清空PID积分
+		pid.integral = 0.0f;
+		pid.last_error = 0;
+		
+		// 恢复循迹状态
+		is_avoiding = 0;
+		avoid_depth = 0;
+		
+		return;
+	}
+	
+	// 正常循迹（调用原有的PID循迹函数）
+	Line_Tracking_PID();
+}
+
+/**
   * @brief  站点停靠功能（旧版本，已废弃）
   * @note   此函数已被Station_Stop_With_Countdown替代，新版本支持OLED倒计时显示
   */
 // 此函数已废弃，请使用Station_Stop_With_Countdown
 
 /**
-  * @brief  基于PID的循迹控制（添加积分项，优化全白/全黑处理，支持站点停靠）
+  * @brief  基于PID的循迹控制（添加积分项，优化全白/全黑处理，支持站点停靠，反向清零逻辑）
   * @retval None
   */
 void Line_Tracking_PID(void)
 {
 	int8_t sensors = Read_IR_Sensors();
 	
-	// 检测全黑（站点）：停靠10秒并显示倒计时
+	// 检测全黑（站点）：停靠指定时间并显示倒计时
 	if(sensors == 0x1F)  // 0b11111
 	{
-		Station_Stop_With_Countdown(10);  // 停靠10秒
+		Motor_Stop();
+		Motor_Forward(3000);
+		HAL_Delay(300);  // 稳定一下
+		if (Read_IR_Sensors() == 0x1F) {
+		Station_Stop_With_Countdown(stop_time_seconds);  // 使用设置的停靠时间
+		}
+		
 		return;
 	}
 	
@@ -473,18 +622,17 @@ void Line_Tracking_PID(void)
 	{
 		// 使用上次的误差继续运行，保持转向
 		// 不更新积分项，避免积分发散
-		int motor_adjust = (int)(pid.Kp * pid.last_error + 
-		                         pid.Kd * (0 - pid.last_error));
+		int motor_adjust = (int)(pid.Kp * pid.last_error);
 		
 		uint16_t base_speed = Get_Speed_Value(sys_status.speed_level);
 		int16_t left_speed = base_speed + motor_adjust;
 		int16_t right_speed = base_speed - motor_adjust;
 		
-		// 限幅（允许速度降到0）
+		// 限幅（允许反转）
 		if(left_speed > PWM_SPEED_MAX) left_speed = PWM_SPEED_MAX;
-		if(left_speed < 0) left_speed = 0;
+		if(left_speed < -PWM_SPEED_MAX) left_speed = -PWM_SPEED_MAX;
 		if(right_speed > PWM_SPEED_MAX) right_speed = PWM_SPEED_MAX;
-		if(right_speed < 0) right_speed = 0;
+		if(right_speed < -PWM_SPEED_MAX) right_speed = -PWM_SPEED_MAX;
 		
 		Motor_DifferentialSpeed(left_speed, right_speed);
 		sys_status.direction = DIR_FORWARD;
@@ -494,6 +642,32 @@ void Line_Tracking_PID(void)
 	// 正常循迹：计算误差（加权法）
 	int error = Calculate_Error();
 	
+	// 反向清零逻辑：减少抖动
+	// 当小车左转时（上次误差<0），如果右侧传感器检测到黑线，说明已回到轨道，清零误差
+	// 当小车右转时（上次误差>0），如果左侧传感器检测到黑线，说明已回到轨道，清零误差
+	if(pid.last_error < -20)  // 上次是左转（偏左）
+	{
+		// 检查右侧传感器（右内或右外）是否检测到黑线
+		if((sensors & 0x02) || (sensors & 0x01))  // 右内(bit1)或右外(bit0)
+		{
+			// 右侧检测到黑线，说明已经回到轨道，清零误差和积分
+			error = 0;
+			pid.integral = 0.0f;
+			pid.last_error = 0;
+		}
+	}
+	else if(pid.last_error > 20)  // 上次是右转（偏右）
+	{
+		// 检查左侧传感器（左内或左外）是否检测到黑线
+		if((sensors & 0x08) || (sensors & 0x10))  // 左内(bit3)或左外(bit4)
+		{
+			// 左侧检测到黑线，说明已经回到轨道，清零误差和积分
+			error = 0;
+			pid.integral = 0.0f;
+			pid.last_error = 0;
+		}
+	}
+	
 	// PID计算
 	int motor_adjust = PID_Calculate(&pid, error);
 	
@@ -502,11 +676,11 @@ void Line_Tracking_PID(void)
 	int16_t left_speed = base_speed + motor_adjust;
 	int16_t right_speed = base_speed - motor_adjust;
 	
-	// 限幅（允许速度降到0，实现更大的转向差速）
+	// 限幅（允许反转，实现原地转向）
 	if(left_speed > PWM_SPEED_MAX) left_speed = PWM_SPEED_MAX;
-	if(left_speed < 0) left_speed = 0;  // 允许降到0，但不反转
+	if(left_speed < -PWM_SPEED_MAX) left_speed = -PWM_SPEED_MAX;
 	if(right_speed > PWM_SPEED_MAX) right_speed = PWM_SPEED_MAX;
-	if(right_speed < 0) right_speed = 0;  // 允许降到0，但不反转
+	if(right_speed < -PWM_SPEED_MAX) right_speed = -PWM_SPEED_MAX;
 	
 	// 差速控制
 	Motor_DifferentialSpeed(left_speed, right_speed);
@@ -617,9 +791,9 @@ uint16_t Get_Speed_Percent(SpeedLevel level)
 {
 	switch(level)
 	{
-		case SPEED_SLOW:   return 20;
-		case SPEED_MEDIUM: return 40;
-		case SPEED_FAST:   return 60;
+		case SPEED_SLOW:   return 30;
+		case SPEED_MEDIUM: return 35;
+		case SPEED_FAST:   return 40;
 		default:           return 0;
 	}
 }
@@ -633,9 +807,9 @@ uint16_t Get_Speed_Value(SpeedLevel level)
 {
 	switch(level)
 	{
-		case SPEED_SLOW:   return 2000;
-		case SPEED_MEDIUM: return 4000;
-		case SPEED_FAST:   return 6000;
+		case SPEED_SLOW:   return 3000;
+		case SPEED_MEDIUM: return 3500;
+		case SPEED_FAST:   return 3500;
 		default:           return 0;
 	}
 }
@@ -670,6 +844,12 @@ void OLED_UpdateStatus(void)
 		sprintf(buffer, "Countdown: %ds", sys_status.countdown);
 		OLED_PrintASCIIString(0, 48, buffer, &afont8x6, OLED_COLOR_NORMAL);
 	}
+	else if(is_avoiding)
+	{
+		// 显示避障状态
+		sprintf(buffer, "AVOID D=%d", avoid_depth);
+		OLED_PrintASCIIString(0, 48, buffer, &afont8x6, OLED_COLOR_NORMAL);
+	}
 	else
 	{
 		// 显示超声波距离
@@ -696,14 +876,18 @@ void Station_Stop_With_Countdown(uint8_t stop_time)
 	sys_status.direction = DIR_STOP;
 	
 	// 上报停靠状态
-	char buffer[50];
-	sprintf(buffer, "STATUS:STOP,STATION:%d\r\n", sys_status.station_count);
+	char buffer[64];
+	sprintf(buffer, "STATUS=STOP,STATION=%d,COUNTDOWN=%d\r\n",sys_status.station_count,stop_time);
 	UART_SendString(buffer);
 	
 	// 倒计时
 	for(uint8_t i = stop_time; i > 0; i--)
 	{
 		sys_status.countdown = i;
+		
+		sprintf(buffer,"STATUS=STOP,STATION=%d,COUNTDOWN=%d\r\n",sys_status.station_count,i);
+    UART_SendString(buffer);
+		
 		OLED_UpdateStatus();  // 更新显示
 		HAL_Delay(1000);  // 延时1秒
 	}
@@ -716,7 +900,9 @@ void Station_Stop_With_Countdown(uint8_t stop_time)
 	
 	// 恢复前进
 	sys_status.direction = DIR_FORWARD;
-	UART_SendString("STATUS:FORWARD\r\n");
+	Motor_Forward(3000);
+	HAL_Delay(500);  // 稳定一下
+	UART_SendString("STATUS=FORWARD\r\n");
 }
 
 /* USER CODE END 0 */
@@ -810,8 +996,8 @@ int main(void)
 				break;
 				
 			case MODE_LINE_TRACK:
-				// 循迹模式：执行PID循迹
-				Line_Tracking_PID();
+				// 循迹模式：执行带避障的PID循迹
+				Line_Tracking_With_Avoidance();
 				break;
 				
 			case MODE_MANUAL:
@@ -918,6 +1104,48 @@ void Bluetooth_Init(void)
 }
 
 /**
+  * @brief  处理多字符命令（如STxx）
+  * @retval None
+  */
+void Process_Multi_Char_Command(void)
+{
+	// 检查是否是STxx命令（设置停靠时间）
+	if(cmd_buffer[0] == 'S' && cmd_buffer[1] == 'T')
+	{
+		// 提取数字部分
+		int time_value = 0;
+		int i = 2;
+		while(i < cmd_index && cmd_buffer[i] >= '0' && cmd_buffer[i] <= '9')
+		{
+			time_value = time_value * 10 + (cmd_buffer[i] - '0');
+			i++;
+		}
+		
+		// 设置停靠时间（范围：1-99秒）
+		if(time_value >= 1 && time_value <= 99)
+		{
+			stop_time_seconds = time_value;
+			char confirm[50];
+			sprintf(confirm, "STOP_TIME_SET:%d\r\n", stop_time_seconds);
+			UART_SendString(confirm);
+		}
+		else
+		{
+			UART_SendString("ERROR:INVALID_TIME_VALUE\r\n");
+		}
+	}
+	// 可以在这里添加其他多字符命令的处理
+	else
+	{
+		UART_SendString("ERROR:UNKNOWN_COMMAND\r\n");
+	}
+	
+	// 清空命令缓冲区
+	cmd_index = 0;
+	memset(cmd_buffer, 0, CMD_BUFFER_SIZE);
+}
+
+/**
   * @brief  处理蓝牙命令
   * @retval None
   */
@@ -928,37 +1156,25 @@ void Bluetooth_Process(void)
 	uint8_t cmd = bt_command;
 	bt_command = 0;  // 清除命令
 	
-	// 数字键0-9的处理（根据模式不同有不同功能）
+	// 数字键0-9的处理（仅用于模式切换）
 	if(cmd >= '0' && cmd <= '9')
 	{
-		if(current_mode == MODE_STOP)
+		// 切换模式
+		switch(cmd)
 		{
-			// 停止模式下：设置停靠时间
-			stop_time_seconds = cmd - '0';  // ASCII转数字
-			if(stop_time_seconds == 0) stop_time_seconds = 10;  // 0表示10秒
-			char confirm[50];
-			sprintf(confirm, "STOP_TIME_SET:%d\r\n", stop_time_seconds);
-			UART_SendString(confirm);
-		}
-		else
-		{
-			// 其他模式下：切换模式
-			switch(cmd)
-			{
-				case '0':  // 停止模式
-					current_mode = MODE_STOP;
-					Motor_Stop();
-					break;
-					
-				case '1':  // 循迹模式
-					current_mode = MODE_LINE_TRACK;
-					pid.integral = 0.0f;  // 清空积分
-					break;
-					
-				case '2':  // 手动模式
-					current_mode = MODE_MANUAL;
-					break;
-			}
+			case '0':  // 停止模式
+				current_mode = MODE_STOP;
+				Motor_Stop();
+				break;
+				
+			case '1':  // 循迹模式
+				current_mode = MODE_LINE_TRACK;
+				pid.integral = 0.0f;  // 清空积分
+				break;
+				
+			case '2':  // 手动模式
+				current_mode = MODE_MANUAL;
+				break;
 		}
 		return;  // 处理完数字键后直接返回
 	}
@@ -1023,6 +1239,18 @@ void Bluetooth_Process(void)
 			Ultrasonic_SendDebugInfo();
 			break;
 		
+		// PID调试信息
+		case 'P':  // PID调试
+		case 'p':
+		{
+			char pid_buffer[100];
+			int8_t sensors = Read_IR_Sensors();
+			sprintf(pid_buffer, "PID:E=%d,I=%.1f,O=%d,S=0x%02X\r\n", 
+			        pid.error, pid.integral, pid.output, sensors);
+			UART_SendString(pid_buffer);
+			break;
+		}
+		
 		// 查询状态
 		case 'Q':  // 查询当前状态
 		case 'q':
@@ -1048,8 +1276,65 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
 	if(huart->Instance == USART1)
 	{
-		// 保存接收到的命令
-		bt_command = bt_rx_buffer[0];
+		uint8_t received_char = bt_rx_buffer[0];
+		uint32_t current_time = HAL_GetTick();
+		
+		// 超时检测：如果距离上次接收超过500ms，清空缓冲区
+		if(current_time - last_rx_time > 500)
+		{
+			cmd_index = 0;
+			memset(cmd_buffer, 0, CMD_BUFFER_SIZE);
+		}
+		last_rx_time = current_time;
+		
+		// 检查是否是回车或换行（命令结束符）
+		if(received_char == '\r' || received_char == '\n')
+		{
+			if(cmd_index > 0)
+			{
+				// 立即处理多字符命令
+				cmd_buffer[cmd_index] = '\0';  // 添加字符串结束符
+				Process_Multi_Char_Command();
+			}
+		}
+		// 检查是否是大写字母（可能是多字符命令的开始）
+		else if(received_char >= 'A' && received_char <= 'Z')
+		{
+			// 如果缓冲区为空，开始新命令
+			if(cmd_index == 0)
+			{
+				cmd_buffer[cmd_index++] = received_char;
+			}
+			// 如果缓冲区已有内容，继续添加
+			else if(cmd_index < CMD_BUFFER_SIZE - 1)
+			{
+				cmd_buffer[cmd_index++] = received_char;
+			}
+		}
+		// 检查是否是数字（可能是多字符命令的参数）
+		else if(received_char >= '0' && received_char <= '9')
+		{
+			// 如果缓冲区有内容（正在接收多字符命令），添加数字
+			if(cmd_index > 0 && cmd_index < CMD_BUFFER_SIZE - 1)
+			{
+				cmd_buffer[cmd_index++] = received_char;
+			}
+			// 如果缓冲区为空，作为单字符命令处理
+			else if(cmd_index == 0)
+			{
+				bt_command = received_char;
+			}
+		}
+		// 其他单字符命令（F/B/L/R/S/+/-/U/Q等）
+		else
+		{
+			// 清空多字符命令缓冲区
+			cmd_index = 0;
+			memset(cmd_buffer, 0, CMD_BUFFER_SIZE);
+			
+			// 保存单字符命令
+			bt_command = received_char;
+		}
 		
 		// 重新启动接收
 		HAL_UART_Receive_IT(&huart1, bt_rx_buffer, 1);
